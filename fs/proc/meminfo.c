@@ -21,6 +21,26 @@
 #include <asm/pgtable.h>
 #include "internal.h"
 
+// #ifdef VENDOR_EDIT
+// Jiajun.xu@ARCH 2020/6/20 add for defrag feature
+#ifdef CONFIG_TCL_DEFRAG
+#include <tcl/defrag_helper.h>
+#endif
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru start
+#ifdef CONFIG_MEMCG_PROTECT_LRU
+#include <linux/protect_lru.h>
+#endif
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru end
+// #endif /* VENDOR_EDIT */
+
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+#include <tcl/tcl_healthinfo.h>
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
+
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
 }
@@ -38,6 +58,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	long cached;
 	long available;
 	unsigned long pages[NR_LRU_LISTS];
+	unsigned long sreclaimable, sunreclaim;
 	int lru;
 
 	si_meminfo(&i);
@@ -53,6 +74,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		pages[lru] = global_node_page_state(NR_LRU_BASE + lru);
 
 	available = si_mem_available();
+	sreclaimable = global_node_page_state(NR_SLAB_RECLAIMABLE);
+	sunreclaim = global_node_page_state(NR_SLAB_UNRECLAIMABLE);
 
 	show_val_kb(m, "MemTotal:       ", i.totalram);
 	show_val_kb(m, "MemFree:        ", i.freeram);
@@ -94,16 +117,17 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "Mapped:         ",
 		    global_node_page_state(NR_FILE_MAPPED));
 	show_val_kb(m, "Shmem:          ", i.sharedram);
-	show_val_kb(m, "Slab:           ",
-		    global_node_page_state(NR_SLAB_RECLAIMABLE) +
-		    global_node_page_state(NR_SLAB_UNRECLAIMABLE));
-
-	show_val_kb(m, "SReclaimable:   ",
-		    global_node_page_state(NR_SLAB_RECLAIMABLE));
-	show_val_kb(m, "SUnreclaim:     ",
-		    global_node_page_state(NR_SLAB_UNRECLAIMABLE));
+	show_val_kb(m, "KReclaimable:   ", sreclaimable +
+		    global_node_page_state(NR_KERNEL_MISC_RECLAIMABLE));
+	show_val_kb(m, "Slab:           ", sreclaimable + sunreclaim);
+	show_val_kb(m, "SReclaimable:   ", sreclaimable);
+	show_val_kb(m, "SUnreclaim:     ", sunreclaim);
 	seq_printf(m, "KernelStack:    %8lu kB\n",
 		   global_zone_page_state(NR_KERNEL_STACK_KB));
+#ifdef CONFIG_SHADOW_CALL_STACK
+	seq_printf(m, "ShadowCallStack:%8lu kB\n",
+		   global_zone_page_state(NR_KERNEL_SCS_BYTES) / 1024);
+#endif
 	show_val_kb(m, "PageTables:     ",
 		    global_zone_page_state(NR_PAGETABLE));
 #ifdef CONFIG_QUICKLIST
@@ -120,7 +144,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "Committed_AS:   ", committed);
 	seq_printf(m, "VmallocTotal:   %8lu kB\n",
 		   (unsigned long)VMALLOC_TOTAL >> 10);
-	show_val_kb(m, "VmallocUsed:    ", 0ul);
+	show_val_kb(m, "VmallocUsed:    ", vmalloc_nr_pages());
 	show_val_kb(m, "VmallocChunk:   ", 0ul);
 	show_val_kb(m, "Percpu:         ", pcpu_nr_pages());
 
@@ -144,6 +168,27 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		    global_zone_page_state(NR_FREE_CMA_PAGES));
 #endif
 
+// #ifdef VENDOR_EDIT
+// Jiajun.xu@ARCH 2020/6/20 add for defrag feature
+#ifdef CONFIG_TCL_DEFRAG
+	show_defrag_free(m);
+	show_real_freemem(m, i.freeram);
+#endif
+// #endif /* VENDOR_EDIT */
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+	show_val_kb(m, "IonTotalCache:  ", global_zone_page_state(NR_IONCACHE_PAGES));
+	show_val_kb(m, "IonTotalUsed:   ", atomic_long_read(&ion_total_size) >> PAGE_SHIFT);
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#ifdef CONFIG_MEMCG_PROTECT_LRU
+	show_val_kb(m, "Protected:      ", get_protected_pages());
+#endif
+// #endif /* VENDOR_EDIT */
 	hugetlb_report_meminfo(m);
 
 	arch_report_meminfo(m);
@@ -157,3 +202,26 @@ static int __init proc_meminfo_init(void)
 	return 0;
 }
 fs_initcall(proc_meminfo_init);
+
+//Begin add by dingting.meng for T-9615384 on 10/7/2020
+#ifdef CONFIG_TCT_DEVICEINFO
+unsigned int get_ddr_sz_GB(void)
+{
+    struct sysinfo i;
+    unsigned long sz_KB = 0;
+    unsigned int  sz_GB = 0;
+
+    si_meminfo(&i);
+
+    sz_KB = i.totalram << (PAGE_SHIFT - 10);
+
+    sz_GB = sz_KB>>20;
+
+/*For example,the Physics DDR size is 3GB,it will less than 3G since the KERNEL USED,sz_GB is UINT type,will be 2,need to +1.
+So,under 1G or over 10G,maybe a problem to fix!!!
+*/
+    return (sz_GB + 1);
+}
+EXPORT_SYMBOL(get_ddr_sz_GB);
+#endif
+//End add by dingting.meng for T-9615384 on 10/7/2020

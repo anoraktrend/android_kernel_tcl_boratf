@@ -159,6 +159,13 @@ struct cpufreq_policy {
 #define CPUFREQ_SHARED_TYPE_ALL	 (2) /* All dependent CPUs should set freq */
 #define CPUFREQ_SHARED_TYPE_ANY	 (3) /* Freq can be set from any dependent CPU*/
 
+// #ifdef VENDOR_EDIT
+// guoli.kuang@ARCH, 2020/10/27, add for ipel
+#ifdef CONFIG_TCL_IPEL
+struct list_head *get_cpufreq_policy_list(void);
+#endif
+// #endif /* VENDOR_EDIT */
+
 #ifdef CONFIG_CPU_FREQ
 struct cpufreq_policy *cpufreq_cpu_get_raw(unsigned int cpu);
 struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu);
@@ -508,6 +515,9 @@ struct cpufreq_governor {
 					 char *buf);
 	int	(*store_setspeed)	(struct cpufreq_policy *policy,
 					 unsigned int freq);
+	// #ifdef CONFIG_TCL_UXEXPRESS
+	int (*trigger)(struct cpufreq_policy *policy);
+	// #endif
 	/* For governors which change frequency dynamically by themselves */
 	bool			dynamic_switching;
 	struct list_head	governor_list;
@@ -931,11 +941,21 @@ static inline bool policy_has_boost_freq(struct cpufreq_policy *policy)
 }
 #endif
 
+#if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
+void sched_cpufreq_governor_change(struct cpufreq_policy *policy,
+			struct cpufreq_governor *old_gov);
+#else
+static inline void sched_cpufreq_governor_change(struct cpufreq_policy *policy,
+			struct cpufreq_governor *old_gov) { }
+#endif
+
 extern void arch_freq_prepare_all(void);
 extern unsigned int arch_freq_get_on_cpu(int cpu);
 
 extern void arch_set_freq_scale(struct cpumask *cpus, unsigned long cur_freq,
 				unsigned long max_freq);
+extern void arch_set_max_freq_scale(struct cpumask *cpus,
+				    unsigned long policy_max_freq);
 
 /* the following are really really optional */
 extern struct freq_attr cpufreq_freq_attr_scaling_available_freqs;

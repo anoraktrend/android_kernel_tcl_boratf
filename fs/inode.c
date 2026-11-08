@@ -11,6 +11,7 @@
 #include <linux/security.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
+#include <linux/fscrypt.h>
 #include <linux/fsnotify.h>
 #include <linux/mount.h>
 #include <linux/posix_acl.h>
@@ -21,6 +22,13 @@
 #include <linux/iversion.h>
 #include <trace/events/writeback.h>
 #include "internal.h"
+
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#ifdef CONFIG_MEMCG_PROTECT_LRU
+#include <linux/protect_lru.h>
+#endif
+// #endif /* VENDOR_EDIT */
 
 /*
  * Inode locking rules:
@@ -133,6 +141,16 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	static const struct file_operations no_open_fops = {.open = no_open};
 	struct address_space *const mapping = &inode->i_data;
 
+	// #ifdef VENDOR_EDIT
+	// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+	#if defined(CONFIG_MEMCG_PROTECT_LRU)
+	inode->i_protect = 0;
+	#ifdef CONFIG_MEMCG_FINE_GRANULARITY_PROTECT_LRU
+	inode->last_region = NULL;
+	INIT_LIST_HEAD(&inode->i_protect_head);
+	#endif
+	#endif
+	// #endif /* VENDOR_EDIT */
 	inode->i_sb = sb;
 	inode->i_blkbits = sb->s_blocksize_bits;
 	inode->i_flags = 0;
@@ -410,6 +428,13 @@ static void inode_lru_list_add(struct inode *inode)
 {
 	if (list_lru_add(&inode->i_sb->s_inode_lru, &inode->i_lru))
 		this_cpu_inc(nr_unused);
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#if defined(CONFIG_MEMCG_PROTECT_LRU)
+	else if (protect_lru_enable && inode->i_protect != 0)
+		list_lru_move(&inode->i_sb->s_inode_lru, &inode->i_lru);
+#endif
+// #endif /* VENDOR_EDIT */
 	else
 		inode->i_state |= I_REFERENCED;
 }
@@ -1802,7 +1827,7 @@ int dentry_needs_remove_privs(struct dentry *dentry)
 	return mask;
 }
 
-static int __remove_privs(struct dentry *dentry, int kill)
+static int __remove_privs(struct vfsmount *mnt, struct dentry *dentry, int kill)
 {
 	struct iattr newattrs;
 
@@ -1811,7 +1836,7 @@ static int __remove_privs(struct dentry *dentry, int kill)
 	 * Note we call this on write, so notify_change will not
 	 * encounter any conflicting delegations:
 	 */
-	return notify_change(dentry, &newattrs, NULL);
+	return notify_change2(mnt, dentry, &newattrs, NULL);
 }
 
 /*
@@ -1838,7 +1863,7 @@ int file_remove_privs(struct file *file)
 	if (kill < 0)
 		return kill;
 	if (kill)
-		error = __remove_privs(dentry, kill);
+		error = __remove_privs(file->f_path.mnt, dentry, kill);
 	if (!error)
 		inode_has_no_xattr(inode);
 
@@ -2169,3 +2194,89 @@ struct timespec64 current_time(struct inode *inode)
 	return timespec64_trunc(now, inode->i_sb->s_time_gran);
 }
 EXPORT_SYMBOL(current_time);
+
+/*
+ * Generic function to check FS_IOC_SETFLAGS values and reject any invalid
+ * configurations.
+ *
+ * Note: the caller should be holding i_mutex, or else be sure that they have
+ * exclusive access to the inode structure.
+ */
+int vfs_ioc_setflags_prepare(struct inode *inode, unsigned int oldflags,
+			     unsigned int flags)
+{
+	/*
+	 * The IMMUTABLE and APPEND_ONLY flags can only be changed by
+	 * the relevant capability.
+	 *
+	 * This test looks nicer. Thanks to Pauline Middelink
+	 */
+	if ((flags ^ oldflags) & (FS_APPEND_FL | FS_IMMUTABLE_FL) &&
+	    !capable(CAP_LINUX_IMMUTABLE))
+		return -EPERM;
+
+	return fscrypt_prepare_setflags(inode, oldflags, flags);
+}
+EXPORT_SYMBOL(vfs_ioc_setflags_prepare);
+
+/*
+ * Generic function to check FS_IOC_FSSETXATTR values and reject any invalid
+ * configurations.
+ *
+ * Note: the caller should be holding i_mutex, or else be sure that they have
+ * exclusive access to the inode structure.
+ */
+int vfs_ioc_fssetxattr_check(struct inode *inode, const struct fsxattr *old_fa,
+			     struct fsxattr *fa)
+{
+	/*
+	 * Can't modify an immutable/append-only file unless we have
+	 * appropriate permission.
+	 */
+	if ((old_fa->fsx_xflags ^ fa->fsx_xflags) &
+			(FS_XFLAG_IMMUTABLE | FS_XFLAG_APPEND) &&
+	    !capable(CAP_LINUX_IMMUTABLE))
+		return -EPERM;
+
+	/*
+	 * Project Quota ID state is only allowed to change from within the init
+	 * namespace. Enforce that restriction only if we are trying to change
+	 * the quota ID state. Everything else is allowed in user namespaces.
+	 */
+	if (current_user_ns() != &init_user_ns) {
+		if (old_fa->fsx_projid != fa->fsx_projid)
+			return -EINVAL;
+		if ((old_fa->fsx_xflags ^ fa->fsx_xflags) &
+				FS_XFLAG_PROJINHERIT)
+			return -EINVAL;
+	}
+
+	/* Check extent size hints. */
+	if ((fa->fsx_xflags & FS_XFLAG_EXTSIZE) && !S_ISREG(inode->i_mode))
+		return -EINVAL;
+
+	if ((fa->fsx_xflags & FS_XFLAG_EXTSZINHERIT) &&
+			!S_ISDIR(inode->i_mode))
+		return -EINVAL;
+
+	if ((fa->fsx_xflags & FS_XFLAG_COWEXTSIZE) &&
+	    !S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode))
+		return -EINVAL;
+
+	/*
+	 * It is only valid to set the DAX flag on regular files and
+	 * directories on filesystems.
+	 */
+	if ((fa->fsx_xflags & FS_XFLAG_DAX) &&
+	    !(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode)))
+		return -EINVAL;
+
+	/* Extent size hints of zero turn off the flags. */
+	if (fa->fsx_extsize == 0)
+		fa->fsx_xflags &= ~(FS_XFLAG_EXTSIZE | FS_XFLAG_EXTSZINHERIT);
+	if (fa->fsx_cowextsize == 0)
+		fa->fsx_xflags &= ~FS_XFLAG_COWEXTSIZE;
+
+	return 0;
+}
+EXPORT_SYMBOL(vfs_ioc_fssetxattr_check);

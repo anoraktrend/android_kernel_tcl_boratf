@@ -98,6 +98,19 @@
 #include <linux/nmi.h>
 #endif
 
+//[TCT-SAT][PERF]Begin added by ziyuanzhao for perf XR11008593 on 20210808
+#ifdef CONFIG_TCL_SPEED_DIRECT_RECLAIM
+extern int direct_vm_swappiness;
+#endif
+//[TCT-SAT][PERF]End added by ziyuanzhao for perf XR11008593 on 20210808
+
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#if defined(CONFIG_MEMCG_PROTECT_LRU)
+#include <linux/protect_lru.h>
+#endif
+// #endif /* VENDOR_EDIT */
+
 #if defined(CONFIG_SYSCTL)
 
 /* External variables not in a header file. */
@@ -108,6 +121,7 @@ extern char core_pattern[];
 extern unsigned int core_pipe_limit;
 #endif
 extern int pid_max;
+extern int extra_free_kbytes;
 extern int pid_max_min, pid_max_max;
 extern int percpu_pagelist_fraction;
 extern int latencytop_enabled;
@@ -131,6 +145,7 @@ static unsigned long zero_ul;
 static unsigned long one_ul = 1;
 static unsigned long long_max = LONG_MAX;
 static int one_hundred = 100;
+static int two_hundred = 200;
 static int one_thousand = 1000;
 #ifdef CONFIG_PRINTK
 static int ten_thousand = 10000;
@@ -315,7 +330,48 @@ static int min_extfrag_threshold;
 static int max_extfrag_threshold = 1000;
 #endif
 
+#ifdef CONFIG_TCT_LIMIT_MEDIASCANNER
+extern int mediascanner_sleep_msecs;
+extern int mediascanner_util_threshold;
+extern int mediascanner_runtime_threshold;
+#endif
+
 static struct ctl_table kern_table[] = {
+#ifdef CONFIG_TCT_LIMIT_MEDIASCANNER
+	{
+		.procname = "mediascanner_sleep_msecs",
+		.data = &mediascanner_sleep_msecs,
+		.maxlen = sizeof(int),
+		.mode = 0644,
+		.proc_handler= proc_dointvec,
+	},
+	{
+		.procname = "mediascanner_util_threshold",
+		.data = &mediascanner_util_threshold,
+		.maxlen = sizeof(int),
+		.mode = 0644,
+		.proc_handler= proc_dointvec,
+	},
+	{
+		.procname = "mediascanner_runtime_threshold",
+		.data = &mediascanner_runtime_threshold,
+		.maxlen = sizeof(int),
+		.mode = 0644,
+		.proc_handler= proc_dointvec,
+	},
+#endif
+// #ifdef VENDOR_EDIT
+// haiqun.yan@KERNEL, 2022/10/28, add boost kill task
+#ifdef CONFIG_BOOST_KILL
+        {
+                .procname       = "boost_killing",
+                .data           = &sysctl_boost_killing,
+                .maxlen         = sizeof(int),
+                .mode           = 0644,
+                .proc_handler   = proc_dointvec,
+        },
+#endif
+// #endif /* VENDOR_EDIT */
 	{
 		.procname	= "sched_child_runs_first",
 		.data		= &sysctl_sched_child_runs_first,
@@ -324,6 +380,13 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #ifdef CONFIG_SCHED_DEBUG
+	{
+		.procname       = "sched_cstate_aware",
+		.data           = &sysctl_sched_cstate_aware,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
 	{
 		.procname	= "sched_min_granularity_ns",
 		.data		= &sysctl_sched_min_granularity,
@@ -341,6 +404,13 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= sched_proc_update_handler,
 		.extra1		= &min_sched_granularity_ns,
 		.extra2		= &max_sched_granularity_ns,
+	},
+	{
+		.procname	= "sched_sync_hint_enable",
+		.data		= &sysctl_sched_sync_hint_enable,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "sched_wakeup_granularity_ns",
@@ -449,6 +519,22 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= sched_rr_handler,
 	},
+#ifdef CONFIG_UCLAMP_TASK
+	{
+		.procname	= "sched_util_clamp_min",
+		.data		= &sysctl_sched_uclamp_util_min,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sysctl_sched_uclamp_handler,
+	},
+	{
+		.procname	= "sched_util_clamp_max",
+		.data		= &sysctl_sched_uclamp_util_max,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sysctl_sched_uclamp_handler,
+	},
+#endif
 #ifdef CONFIG_SCHED_AUTOGROUP
 	{
 		.procname	= "sched_autogroup_enabled",
@@ -468,6 +554,17 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &one,
+	},
+#endif
+#if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
+	{
+		.procname	= "sched_energy_aware",
+		.data		= &sysctl_sched_energy_aware,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sched_energy_aware_handler,
+		.extra1		= &zero,
+		.extra2		= &one,
 	},
 #endif
 #ifdef CONFIG_PROVE_LOCKING
@@ -1250,6 +1347,15 @@ static struct ctl_table vm_table[] = {
 		.extra1		= &zero,
 		.extra2		= &two,
 	},
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+	{
+		.procname	= "speculative_page_fault",
+		.data		= &sysctl_speculative_page_fault,
+		.maxlen		= sizeof(sysctl_speculative_page_fault),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "panic_on_oom",
 		.data		= &sysctl_panic_on_oom,
@@ -1272,6 +1378,13 @@ static struct ctl_table vm_table[] = {
 		.maxlen		= sizeof(sysctl_oom_dump_tasks),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname       = "reap_mem_on_sigkill",
+		.data           = &sysctl_reap_mem_on_sigkill,
+		.maxlen         = sizeof(sysctl_reap_mem_on_sigkill),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
 	},
 	{
 		.procname	= "overcommit_ratio",
@@ -1359,8 +1472,21 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
-		.extra2		= &one_hundred,
+		.extra2		= &two_hundred,
 	},
+//[TCT-SAT][PERF]Begin added by ziyuanzhao for perf XR11008593 on 20210808
+#ifdef CONFIG_TCL_SPEED_DIRECT_RECLAIM
+	{
+		.procname	= "direct_swappiness",
+		.data		= &direct_vm_swappiness,
+		.maxlen		= sizeof(direct_vm_swappiness),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &two_hundred,
+	},
+#endif
+//[TCT-SAT][PERF]End added by ziyuanzhao for perf XR11008593 on 20210808
 #ifdef CONFIG_HUGETLB_PAGE
 	{
 		.procname	= "nr_hugepages",
@@ -1418,6 +1544,25 @@ static struct ctl_table vm_table[] = {
 		.extra1		= &one,
 		.extra2		= &four,
 	},
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#if defined(CONFIG_MEMCG_PROTECT_LRU)
+	{
+		.procname       = "protect_lru",
+		.mode           = 0440,
+		.child          = protect_lru_table,
+	},
+#endif
+// #endif /* VENDOR_EDIT */
+#ifdef CONFIG_TCT_FAST_DROP_SUPPORT
+	{
+		.procname       = "fast_drop",
+		.data           = &sysctl_fast_drop,
+		.maxlen         = sizeof(unsigned long),
+		.mode           = 0222,
+		.proc_handler   = fast_drop_sysctl_handler,
+	},
+#endif //CONFIG_TCT_FAST_DROP_SUPPORT
 #ifdef CONFIG_COMPACTION
 	{
 		.procname	= "compact_memory",
@@ -1462,6 +1607,14 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= watermark_scale_factor_sysctl_handler,
 		.extra1		= &one,
 		.extra2		= &one_thousand,
+	},
+	{
+		.procname	= "extra_free_kbytes",
+		.data		= &extra_free_kbytes,
+		.maxlen		= sizeof(extra_free_kbytes),
+		.mode		= 0644,
+		.proc_handler	= min_free_kbytes_sysctl_handler,
+		.extra1		= &zero,
 	},
 	{
 		.procname	= "percpu_pagelist_fraction",

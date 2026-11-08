@@ -1460,7 +1460,7 @@ static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
 		sk = kmem_cache_alloc(slab, priority & ~__GFP_ZERO);
 		if (!sk)
 			return sk;
-		if (priority & __GFP_ZERO)
+		if (want_init_on_alloc(priority))
 			sk_prot_clear_nulls(sk, prot->obj_size);
 	} else
 		sk = kmalloc(prot->obj_size, priority);
@@ -1541,6 +1541,11 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 		sock_update_classid(&sk->sk_cgrp_data);
 		sock_update_netprioidx(&sk->sk_cgrp_data);
 		sk_tx_queue_clear(sk);
+		// #ifdef VENDOR_EDIT
+		// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+		sk->sk_pid = 0;
+		*(sk->sk_process_name) = '\0';
+		// #endif /* VENDOR_EDIT */
 	}
 
 	return sk;

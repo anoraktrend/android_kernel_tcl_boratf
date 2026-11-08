@@ -21,6 +21,10 @@ SUBSYS(cpu)
 SUBSYS(cpuacct)
 #endif
 
+#if IS_ENABLED(CONFIG_SCHED_TUNE)
+SUBSYS(schedtune)
+#endif
+
 #if IS_ENABLED(CONFIG_BLK_CGROUP)
 SUBSYS(io)
 #endif
@@ -67,6 +71,19 @@ SUBSYS(rdma)
 #if IS_ENABLED(CONFIG_CGROUP_DEBUG)
 SUBSYS(debug)
 #endif
+
+//[TCT-ROM]Begin added by xizheng.mo for 9572106 blkio type on 20200716
+#if IS_ENABLED(CONFIG_TCT_IOLIMIT) || IS_ENABLED(CONFIG_CGROUP_IOLIMIT)
+SUBSYS(iolimit)
+#endif
+//[TCT-ROM]End added by xizheng.mo for 9572106 blkio type on 20200716
+
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@kernel 2021/09/03 add for iolimit
+//#if IS_ENABLED(CONFIG_CGROUP_IOLIMIT)
+//SUBSYS(iolimit)
+//#endif
+// #endif /* VENDOR_EDIT */
 
 /*
  * DO NOT ADD ANY SUBSYSTEM WITHOUT EXPLICIT ACKS FROM CGROUP MAINTAINERS.

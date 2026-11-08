@@ -1,28 +1,8 @@
-/*
- * Copyright (c) 2015 MediaTek Inc.
- * Author: Honghui Zhang <honghui.zhang@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+/* SPDX-License-Identifier: GPL-2.0 */
 
 #ifndef _MT2701_LARB_PORT_H_
 #define _MT2701_LARB_PORT_H_
 
-/*
- * Mediatek m4u generation 1 such as mt2701 has flat m4u port numbers,
- * the first port's id for larb[N] would be the last port's id of larb[N - 1]
- * plus one while larb[0]'s first port number is 0. The definition of
- * MT2701_M4U_ID_LARBx is following HW register spec.
- * But m4u generation 2 like mt8173 have different port number, it use fixed
- * offset for each larb, the first port's id for larb[N] would be (N * 32).
- */
 #define LARB0_PORT_OFFSET		0
 #define LARB1_PORT_OFFSET		11
 #define LARB2_PORT_OFFSET		21

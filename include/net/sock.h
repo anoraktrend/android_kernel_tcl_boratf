@@ -73,6 +73,7 @@
 #include <linux/net_tstamp.h>
 #include <net/smc.h>
 #include <net/l3mdev.h>
+#include <linux/android_kabi.h>
 
 /*
  * This structure really needs to be cleaned up.
@@ -509,6 +510,20 @@ struct sock {
 	void                    (*sk_destruct)(struct sock *sk);
 	struct sock_reuseport __rcu	*sk_reuseport_cb;
 	struct rcu_head		sk_rcu;
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	pid_t			sk_pid;
+	char			sk_process_name[TASK_COMM_LEN];
+	// #endif /* VENDOR_EDIT */
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
+	ANDROID_KABI_RESERVE(5);
+	ANDROID_KABI_RESERVE(6);
+	ANDROID_KABI_RESERVE(7);
+	ANDROID_KABI_RESERVE(8);
 };
 
 enum sk_pacing {

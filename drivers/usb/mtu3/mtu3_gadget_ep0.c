@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * mtu3_gadget_ep0.c - MediaTek USB3 DRD peripheral driver ep0 handling
- *
- * Copyright (c) 2016 MediaTek Inc.
- *
- * Author:  Chunfeng.Yun <chunfeng.yun@mediatek.com>
- */
 
 #include <linux/iopoll.h>
 #include <linux/usb/composite.h>
 
 #include "mtu3.h"
+#include "mtu3_debug.h"
+#include "mtu3_trace.h"
 
 /* ep0 is always mtu3->in_eps[0] */
 #define	next_ep0_request(mtu)	next_request((mtu)->ep0)
@@ -124,12 +119,6 @@ static void ep0_load_test_packet(struct mtu3 *mtu)
 	ep0_write_fifo(mtu->ep0, mtu3_test_packet, sizeof(mtu3_test_packet));
 }
 
-/*
- * A. send STALL for setup transfer without data stage:
- *		set SENDSTALL and SETUPPKTRDY at the same time;
- * B. send STALL for other cases:
- *		set SENDSTALL only.
- */
 static void ep0_stall_set(struct mtu3_ep *mep0, bool set, u32 pktrdy)
 {
 	struct mtu3 *mtu = mep0->mtu;
@@ -420,13 +409,6 @@ static int ep0_handle_feature(struct mtu3 *mtu,
 	return handled;
 }
 
-/*
- * handle all control requests can be handled
- * returns:
- *	negative errno - error happened
- *	zero - need delegate SETUP to gadget driver
- *	positive - already handled
- */
 static int handle_standard_request(struct mtu3 *mtu,
 			  struct usb_ctrlrequest *setup)
 {
@@ -633,7 +615,9 @@ __acquires(mtu->lock)
 	void __iomem *mbase = mtu->mac_base;
 	int handled = 0;
 
+	memset(&setup, 0, sizeof(setup));
 	ep0_read_setup(mtu, &setup);
+	trace_mtu3_handle_setup(&setup);
 
 	if ((setup.bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
 		handled = handle_standard_request(mtu, &setup);
@@ -692,8 +676,12 @@ irqreturn_t mtu3_ep0_isr(struct mtu3 *mtu)
 	mtu3_writel(mbase, U3D_EPISR, int_status); /* W1C */
 
 	/* only handle ep0's */
-	if (!(int_status & EP0ISR))
+	if (!(int_status & (EP0ISR | SETUPENDISR)))
 		return IRQ_NONE;
+
+	/* abort current SETUP, and process new one */
+	if (int_status & SETUPENDISR)
+		mtu->ep0_state = MU3D_EP0_STATE_SETUP;
 
 	csr = mtu3_readl(mbase, U3D_EP0CSR);
 
@@ -706,6 +694,7 @@ irqreturn_t mtu3_ep0_isr(struct mtu3 *mtu)
 		ret = IRQ_HANDLED;
 	}
 	dev_dbg(mtu->dev, "ep0_state: %s\n", decode_ep0_state(mtu));
+	mtu3_dbg_trace(mtu->dev, "ep0_state %s", decode_ep0_state(mtu));
 
 	switch (mtu->ep0_state) {
 	case MU3D_EP0_STATE_TX:

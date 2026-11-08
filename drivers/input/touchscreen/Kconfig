@@ -9,6 +9,10 @@ menuconfig INPUT_TOUCHSCREEN
 
 	  If unsure, say Y.
 
+source "drivers/input/touchscreen/mediatek/Kconfig"
+
+source "drivers/input/touchscreen/NT36672C/Kconfig"
+
 if INPUT_TOUCHSCREEN
 
 config TOUCHSCREEN_PROPERTIES
@@ -1239,6 +1243,16 @@ config TOUCHSCREEN_SX8654
 	  To compile this driver as a module, choose M here: the
 	  module will be called sx8654.
 
+config TOUCHSCREEN_MTK_NT36572_COMMON
+         bool "NT36572 for Mediatek package"
+         default n
+         help
+           Say Y here if you have NT36572 touch panel.
+           If unsure, say N.
+           To compile this dirver as a module, choose M here: the
+           module will be called.
+source "drivers/input/touchscreen/nt36572_common/Kconfig"
+
 config TOUCHSCREEN_TPS6507X
 	tristate "TPS6507x based touchscreens"
 	depends on I2C
@@ -1300,4 +1314,205 @@ config TOUCHSCREEN_ROHM_BU21023
 	  To compile this driver as a module, choose M here: the
 	  module will be called bu21023_ts.
 
+config TOUCHSCREEN_MTK_GT1151
+        bool "GT1151 for Mediatek package"
+        default n
+        help
+          Say Y here if you have GT1151 touch panel.
+
+          If unsure, say N.
+
+          To compile this dirver as a module, choose M here: the
+          module will be called.
+
+source "drivers/input/touchscreen/GT1151/Kconfig"
+
+config TOUCHSCREEN_MTK_FOCALTECH_HD
+	bool "Focaltech Touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have Focaltech touch panel.
+	  If unsure, say N.
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+
+config TOUCHSCREEN_MTK_FOCALTECH_FHD
+	bool "Focaltech FHD Touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have Focaltech touch panel.
+	  If unsure, say N
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+
+config TOUCHSCREEN_MTK_SYNAPTICS_I2C_RMI4
+        tristate "Synaptics DSX I2C touchscreen"
+        depends on I2C
+        help
+          Say Y here if you have a Synaptics DSX I2C touchscreen
+          connected to your system.
+
+          If unsure, say N.
+
+          To compile this driver as a module, choose M here: the
+          module will be called synaptics_i2c_rmi4.
+
+source "drivers/input/touchscreen/cruze_pro_ft8756_touch/Kconfig"
+config TOUCHSCREEN_CRUZE_PRO_FT8756
+	bool "Focaltech Touchscreen"
+	default n
+	help
+	  Say Y here if you have Focaltech touch panel.
+	  If unsure, say N.
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+
+source "drivers/input/touchscreen/passat_ft3519_fhdplus_i2c_touch/Kconfig"
+config TOUCHSCREEN_PASSAT_FT3519_FHDPLUS_I2C
+    bool "Focaltech Touchscreen"
+    default n
+    help
+      Say Y here if you have Focaltech touch panel.
+      If unsure, say N.
+
+source "drivers/input/touchscreen/synaptics_i2c_rmi4/Kconfig"
+source "drivers/input/touchscreen/cruze_nt36525b_spi/Kconfig"
+#Begin add by jingqing.yan for task 11445823 on 2021.08.30
+config TCT_PROJECT_CRUZE_PRO
+	tristate "build project name of CRUZE_PRO"
+	default n
+	help
+	This option enables when build CRUZE_PRO.
+config TOUCHSCREEN_CRUZE_NL9911C
+	bool "Truly Touchscreen"
+	default n
+	help
+	  Say Y here if you have Truly touch panel.
+	  If unsure, say N.
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+#End add by jingqing.yan for task 11445823 on 2021.08.30
+
+config TOUCHSCREEN_MTK_TOUCH
+	string "Touch IC name for Mediatek package"
+	help
+	  Set touch IC name if you have touch panel.
+
+	  To compile this dirver for used touch IC.
+
+source "drivers/input/touchscreen/dohatmo_ft8756_touch/Kconfig"
+
+config TOUCHSCREEN_DOHATMO_FT8756
+    bool "Focaltech Touchscreen"
+    default n
+    help
+      Say Y here if you have Focaltech touch panel.
+      If unsure, say N.
+config TOUCHSCREEN_CRUZELITETF_CHIPONE
+    bool "chipone Touchscreen"
+    default n
+    help
+      Say Y here if you have Focaltech touch panel.
+      If unsure, say N.
+
+config TOUCHSCREEN_NT36XXX_HOSTDL_SPI
+    bool "novatek Touchscreen"
+    default n
+    help
+      Say Y here if you have novatek Touchscreen.
+      If unsure, say N.
+
+source "drivers/input/touchscreen/cruzelitetf_nt36525b_spi/Kconfig"
+
+config TOUCHSCREEN_NT36XXX_SPI_AUSTINTF
+    bool "novatek Touchscreen"
+    default n
+    help
+      Say Y here if you have novatek Touchscreen.
+      If unsure, say N.
+
+source "drivers/input/touchscreen/austintf_nt36525b_spi/Kconfig"
+
+#Begin add by bing-zhang for RATF-425 on 2022/01/05
+config TOUCHSCREEN_RAPIDTF_CHSC5XXX_I2C
+    bool "chsc Touchscreen"
+    default n
+    help
+      Say Y here if you have chsc Touchscreen.
+      If unsure, say N.
+
+source "drivers/input/touchscreen/rapidtf_chsc5xxx_i2c/Kconfig"
+#End add by bing-zhang for RATF-425 on 2022/01/05
+
+# begin add by jiaxin.pi for buffalo proting ctp
+config TOUCHSCREEN_BUFFALO_FT8756
+    bool "Focaltech Touchscreen"
+    default n
+    help
+      Say Y here if you have Focaltech touch panel.
+      If unsure, say N.
+
+# end add by jiaxin.pi for buffalo proting ctp
+
+config TCT_PROJECT_BUFFALO
+	tristate "build project name of Buffalo"
+	default n
+	help
+	  This option enables when build Buffalo.
+
+#Begin add by bing-zhang for  on 2022/06/07
+config TOUCHSCREEN_ENCORE_NL9916_HDPLUS1612_SPI
+    bool "NL Touchscreen"
+    default n
+    help
+      Say Y here if you have NL touch panel.
+      If unsure, say N.
+#End add by bing-zhang for  on 2022/06/07
+
+config TOUCHSCREEN_ENCORE_FT8057_HDPLUS1612_SPI
+    bool "NL Touchscreen"
+    default n
+    help
+      Say Y here if you have NL touch panel.
+      If unsure, say N.
+	  
+#bora start
+config TOUCHSCREEN_BORA_FT8006S_HD_SPI
+    bool "project bora ft8006 config"
+    default n
+    help 
+      Say Y here if your project is bora.
+      If unsure, say N.
+config TOUCHSCREEN_BORA_GC7202_HD_SPI
+    bool "project bora gc7202 config"
+    default n
+    help 
+      Say Y here if your project is bora.
+      If unsure, say N.
+config TOUCHSCREEN_BORA_CHIPONE_TDDI_HD_SPI
+    bool "project bora chipone config"
+    default n
+    help 
+      Say Y here if your project is bora.
+      If unsure, say N.
+config TOUCHSCREEN_BORA_GC7202H_HD_SPI
+    bool "project bora gc7202h config"
+    default n
+    help 
+      Say Y here if your project is bora.
+      If unsure, say N.
+#bora end
+
+config TOUCHSCREEN_SONATA_ICNL9916_SPI
+    bool "ICNL9916 Chipone Touchscreen"
+    default n
+    help
+      Say Y here if you have ICNL9916 chipone touch panel.
+      If unsure, say N.
+	  
+source "drivers/input/touchscreen/sonata_ft8057_spi_touch/Kconfig"
 endif

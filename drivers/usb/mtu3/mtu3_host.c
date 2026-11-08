@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * mtu3_dr.c - dual role switch and host glue layer
- *
- * Copyright (C) 2016 MediaTek Inc.
- *
- * Author: Chunfeng Yun <chunfeng.yun@mediatek.com>
- */
 
 #include <linux/clk.h>
 #include <linux/iopoll.h>
@@ -24,6 +17,12 @@
 #define WC1_IS_EN	BIT(25)
 #define WC1_IS_P	BIT(6)  /* polarity for ip sleep */
 
+/* mt8183 */
+#define PERI_WK_CTRL0	0x0
+#define WC0_IS_C(x)	(((x) & 0xfU) << 28) /* cycle debounce */
+#define WC0_IS_P	BIT(12) /* polarity */
+#define WC0_IS_EN	BIT(6)
+
 /* mt2712 etc */
 #define PERI_SSUSB_SPM_CTRL	0x0
 #define SSC_IP_SLEEP_EN	BIT(4)
@@ -32,12 +31,9 @@
 enum ssusb_uwk_vers {
 	SSUSB_UWK_V1 = 1,
 	SSUSB_UWK_V2,
+	SSUSB_UWK_V1_1 = 101, /* specific revision 1.01 */
 };
 
-/*
- * ip-sleep wakeup mode:
- * all clocks can be turn off, but power domain should be kept on
- */
 static void ssusb_wakeup_ip_sleep_set(struct ssusb_mtk *ssusb, bool enable)
 {
 	u32 reg, msk, val;
@@ -52,6 +48,11 @@ static void ssusb_wakeup_ip_sleep_set(struct ssusb_mtk *ssusb, bool enable)
 		reg = ssusb->uwk_reg_base + PERI_SSUSB_SPM_CTRL;
 		msk = SSC_IP_SLEEP_EN | SSC_SPM_INT_EN;
 		val = enable ? msk : 0;
+		break;
+	case SSUSB_UWK_V1_1:
+		reg = ssusb->uwk_reg_base + PERI_WK_CTRL0;
+		msk = WC0_IS_EN | WC0_IS_C(0xf) | WC0_IS_P;
+		val = enable ? (WC0_IS_EN | WC0_IS_C(0x8)) : 0;
 		break;
 	default:
 		return;
@@ -205,6 +206,7 @@ static void ssusb_host_setup(struct ssusb_mtk *ssusb)
 		ssusb_set_force_mode(ssusb, MTU3_DR_FORCE_HOST);
 
 	/* if port0 supports dual-role, works as host mode by default */
+	ssusb_set_force_vbus(ssusb, false);
 	ssusb_set_vbus(&ssusb->otg_switch, 1);
 }
 
@@ -216,12 +218,6 @@ static void ssusb_host_cleanup(struct ssusb_mtk *ssusb)
 	ssusb_host_disable(ssusb, false);
 }
 
-/*
- * If host supports multiple ports, the VBUSes(5V) of ports except port0
- * which supports OTG are better to be enabled by default in DTS.
- * Because the host driver will keep link with devices attached when system
- * enters suspend mode, so no need to control VBUSes after initialization.
- */
 int ssusb_host_init(struct ssusb_mtk *ssusb, struct device_node *parent_dn)
 {
 	struct device *parent_dev = ssusb->dev;

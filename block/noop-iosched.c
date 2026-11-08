@@ -76,7 +76,6 @@ static int noop_init_queue(struct request_queue *q, struct elevator_type *e)
 	eq->elevator_data = nd;
 
 	INIT_LIST_HEAD(&nd->queue);
-
 	spin_lock_irq(q->queue_lock);
 	q->elevator = eq;
 	spin_unlock_irq(q->queue_lock);

@@ -1,0 +1,44 @@
+#
+#Fingerprint
+#
+menu "Fingerprint support"
+	depends on INPUT
+
+config MTK_FINGERPRINT_SUPPORT
+	bool "Mediatek Fingerprint"
+	default n
+	help
+	  Fingerprint mtk driver enable/disable
+	  in the kernel.Say Y here if you want to
+	  use mediatek fingerprint driver,fingerprint
+	  driver will support fingerprint function
+
+config MTK_FINGERPRINT_SELECT
+	string "sensor type"
+	default "GF318M"
+
+# [TCTNB][FINGERPRINT]Added_begin by Jiancong.Huang for F11394572 at 2021/8/12
+source drivers/input/fingerprint/focaltech_capcitive_b/Kconfig
+# [TCTNB][FINGERPRINT]Added_end by Jiancong.Huang for F11394572 at 2021/8/12
+
+#added by qianbo.pan for Task:11387489 on 2021.08.24
+source drivers/input/fingerprint/sunwave_fp/Kconfig
+
+#start, guang.xiao, 2022/02/27, fingerprint porting
+source drivers/input/fingerprint/buffalotmo/focaltech/Kconfig
+source drivers/input/fingerprint/buffalotmo/sunwave_fp/Kconfig
+#end, guang.xiao, 2022/02/27, fingerprint porting
+# Begin added by liuyu for passat-T fingerprint porting on 2022-5-10
+source drivers/input/fingerprint/TCT-fingerprint/chipone_fp/Kconfig
+source drivers/input/fingerprint/TCT-fingerprint/focaltech/Kconfig
+# End added by liuyu for passat-T fingerprint porting on 2022-5-10
+
+#Begin added by liangjiaqiang for MODEL3-1890 on 2022-09-15
+source drivers/input/fingerprint/TCT-fingerprint/regulator/Kconfig
+#End added by liangjiaqiang for MODEL3-1890 on 2022-09-15
+
+# Begin added by weizhen.pang for EncoreVZW FR ENCOREVZW-6415 on 20221011
+source drivers/input/fingerprint/fortsense_fp/Kconfig
+# end added by weizhen.pang for EncoreVZW FR ENCOREVZW-6415 on 20221011
+
+endmenu

@@ -18,6 +18,7 @@
 #include <linux/pageblock-flags.h>
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
+#include <linux/android_kabi.h>
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
@@ -40,8 +41,6 @@ enum migratetype {
 	MIGRATE_UNMOVABLE,
 	MIGRATE_MOVABLE,
 	MIGRATE_RECLAIMABLE,
-	MIGRATE_PCPTYPES,	/* the number of types on the pcp lists */
-	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
 #ifdef CONFIG_CMA
 	/*
 	 * MIGRATE_CMA migration type is designed to mimic the way
@@ -58,6 +57,14 @@ enum migratetype {
 	 */
 	MIGRATE_CMA,
 #endif
+	// #ifdef VENDOR_EDIT
+	// Jiajun.xu@ARCH 2020/6/20 add for defrag feature
+#ifdef CONFIG_TCL_DEFRAG
+	MIGRATE_UNMOVABLE_DEFRAG,
+#endif
+	// #endif /* VENDOR_EDIT */
+	MIGRATE_PCPTYPES, /* the number of types on the pcp lists */
+	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
 #ifdef CONFIG_MEMORY_ISOLATION
 	MIGRATE_ISOLATE,	/* can't allocate from here */
 #endif
@@ -70,9 +77,11 @@ extern char * const migratetype_names[MIGRATE_TYPES];
 #ifdef CONFIG_CMA
 #  define is_migrate_cma(migratetype) unlikely((migratetype) == MIGRATE_CMA)
 #  define is_migrate_cma_page(_page) (get_pageblock_migratetype(_page) == MIGRATE_CMA)
+#  define get_cma_migrate_type() MIGRATE_CMA
 #else
 #  define is_migrate_cma(migratetype) false
 #  define is_migrate_cma_page(_page) false
+#  define get_cma_migrate_type() MIGRATE_MOVABLE
 #endif
 
 static inline bool is_migrate_movable(int mt)
@@ -83,6 +92,26 @@ static inline bool is_migrate_movable(int mt)
 #define for_each_migratetype_order(order, type) \
 	for (order = 0; order < MAX_ORDER; order++) \
 		for (type = 0; type < MIGRATE_TYPES; type++)
+
+#ifdef CONFIG_TCT_MEMORY_DEFRAG
+#ifndef CONFIG_FORCE_ZONEAREA_SHIFT
+#define AREA_SHIFT 2
+#else
+#define AREA_SHIFT CONFIG_FORCE_ZONEAREA_SHIFT
+#endif
+#define NR_AREA (1 << AREA_SHIFT)
+
+#define foreach_area_order(i, order, start) \
+	for(i = 0; i < NR_AREA; i++) \
+		for(order = start; order < MAX_ORDER; ++order)
+
+#define foreach_area_migratetype_order(i, order, type) \
+	for (i = 0; i < NR_AREA; ++i) \
+		for_each_migratetype_order(order, type)
+
+#define free_area_id(i, order) \
+    ((order) > PAGE_ALLOC_COSTLY_ORDER ? (NR_AREA - 1 - (i)) : i)
+#endif
 
 extern int page_group_by_mobility_disabled;
 
@@ -142,12 +171,28 @@ enum zone_stat_item {
 	NR_MLOCK,		/* mlock()ed pages found and moved off LRU */
 	NR_PAGETABLE,		/* used for pagetables */
 	NR_KERNEL_STACK_KB,	/* measured in KiB */
+#if IS_ENABLED(CONFIG_SHADOW_CALL_STACK)
+	NR_KERNEL_SCS_BYTES,	/* measured in bytes */
+#endif
 	/* Second 128 byte cacheline */
 	NR_BOUNCE,
 #if IS_ENABLED(CONFIG_ZSMALLOC)
 	NR_ZSPAGES,		/* allocated in zsmalloc */
 #endif
 	NR_FREE_CMA_PAGES,
+	// #ifdef VENDOR_EDIT
+	// Jiajun.xu@ARCH 2020/6/20 add for defrag feature
+#ifdef CONFIG_TCL_DEFRAG
+	NR_FREE_DEFRAG_PAGES,
+#endif
+	// #endif /* VENDOR_EDIT */
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+	NR_IONCACHE_PAGES,
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 	NR_VM_ZONE_STAT_ITEMS };
 
 enum node_stat_item {
@@ -161,8 +206,28 @@ enum node_stat_item {
 	NR_SLAB_UNRECLAIMABLE,
 	NR_ISOLATED_ANON,	/* Temporary isolated pages from anon lru */
 	NR_ISOLATED_FILE,	/* Temporary isolated pages from file lru */
+// #ifdef VENDOR_EDIT
+// huan22.wang@tcl.com, 2021/10/14, Workingset protection/detection on the anonymous LRU list V7.0
+#ifndef CONFIG_REFAULT_IO_VMSCAN
 	WORKINGSET_REFAULT,
 	WORKINGSET_ACTIVATE,
+	WORKINGSET_RESTORE,
+#else
+	WORKINGSET_REFAULT_BASE,
+	WORKINGSET_REFAULT_ANON = WORKINGSET_REFAULT_BASE,
+	WORKINGSET_REFAULT_FILE,
+	WORKINGSET_ACTIVATE_BASE,
+	WORKINGSET_ACTIVATE_ANON = WORKINGSET_ACTIVATE_BASE,
+	WORKINGSET_ACTIVATE_FILE,
+	WORKINGSET_RESTORE_BASE,
+	WORKINGSET_RESTORE_ANON = WORKINGSET_RESTORE_BASE,
+	WORKINGSET_RESTORE_FILE,
+#ifdef CONFIG_TCL_FINE_MM_CORE
+	WORKINGSET_ANON_COST,
+	WORKINGSET_FILE_COST,
+#endif
+#endif
+// #endif /* VENDOR_EDIT */
 	WORKINGSET_NODERECLAIM,
 	NR_ANON_MAPPED,	/* Mapped anonymous pages */
 	NR_FILE_MAPPED,	/* pagecache pages mapped into pagetables.
@@ -180,7 +245,11 @@ enum node_stat_item {
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
-	NR_INDIRECTLY_RECLAIMABLE_BYTES, /* measured in bytes */
+	NR_KERNEL_MISC_RECLAIMABLE,	/* reclaimable non-slab kernel pages */
+	NR_UNRECLAIMABLE_PAGES,
+	NR_ION_HEAP,
+	NR_ION_HEAP_POOL,
+	NR_GPU_HEAP,
 	NR_VM_NODE_STAT_ITEMS
 };
 
@@ -220,6 +289,14 @@ static inline int is_active_lru(enum lru_list lru)
 	return (lru == LRU_ACTIVE_ANON || lru == LRU_ACTIVE_FILE);
 }
 
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#if defined(CONFIG_MEMCG_PROTECT_LRU)
+#define PROTECT_LEVELS_MAX      3
+#endif
+// #endif /* VENDOR_EDIT */
+
+#ifndef CONFIG_REFAULT_IO_VMSCAN
 struct zone_reclaim_stat {
 	/*
 	 * The pageout code in vmscan.c keeps track of how many of the
@@ -232,14 +309,34 @@ struct zone_reclaim_stat {
 	unsigned long		recent_rotated[2];
 	unsigned long		recent_scanned[2];
 };
+#endif
 
 struct lruvec {
 	struct list_head		lists[NR_LRU_LISTS];
+// #ifdef VENDOR_EDIT
+// huan22.wang@tcl.com, 2021/10/14, Workingset protection/detection on the anonymous LRU list V7.0
+#ifndef CONFIG_REFAULT_IO_VMSCAN
 	struct zone_reclaim_stat	reclaim_stat;
 	/* Evictions & activations on the inactive file list */
 	atomic_long_t			inactive_age;
 	/* Refaults at the time of last reclaim cycle */
 	unsigned long			refaults;
+#else
+	/*
+	 * These track the cost of reclaiming one LRU - file or anon -
+	 * over the other. As the observed cost of reclaiming one LRU
+	 * increases, the reclaim scan balance tips toward the other.
+	*/
+#ifndef CONFIG_TCL_FINE_MM_CORE
+	unsigned long                   anon_cost;
+	unsigned long                   file_cost;
+#endif
+	/* Evictions & activations on the inactive file list */
+	atomic_long_t                   nonresident_age;
+	/* Refaults at the time of last reclaim cycle, anon=0, file=1 */
+	unsigned long                   refaults[2];
+#endif
+// #endif /* VENDOR_EDIT */
 #ifdef CONFIG_MEMCG
 	struct pglist_data *pgdat;
 #endif
@@ -381,6 +478,10 @@ struct zone {
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pageset __percpu *pageset;
 
+#ifdef CONFIG_CMA
+	bool			cma_alloc;
+#endif
+
 #ifndef CONFIG_SPARSEMEM
 	/*
 	 * Flags for a pageblock_nr_pages block. See pageblock-flags.h.
@@ -459,7 +560,11 @@ struct zone {
 	ZONE_PADDING(_pad1_)
 
 	/* free areas of different sizes */
+#ifdef CONFIG_TCT_MEMORY_DEFRAG
+	struct free_area	free_area[NR_AREA][MAX_ORDER];
+#else
 	struct free_area	free_area[MAX_ORDER];
+#endif
 
 	/* zone flags, see below */
 	unsigned long		flags;
@@ -506,6 +611,11 @@ struct zone {
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {
@@ -663,6 +773,12 @@ typedef struct pglist_data {
 
 	int kswapd_failures;		/* Number of 'reclaimed == 0' runs */
 
+#ifdef CONFIG_TCL_FINE_MM_CORE
+	wait_queue_head_t zswapd_wait;
+	atomic_t zswapd_wait_flag;
+	struct task_struct *zswapd;
+#endif
+
 #ifdef CONFIG_COMPACTION
 	int kcompactd_max_order;
 	enum zone_type kcompactd_classzone_idx;
@@ -781,6 +897,13 @@ static inline struct pglist_data *lruvec_pgdat(struct lruvec *lruvec)
 	return container_of(lruvec, struct pglist_data, lruvec);
 #endif
 }
+
+#ifdef CONFIG_TCL_FINE_MM_CORE
+static inline int is_node_lruvec(struct lruvec *lruvec)
+{
+	return &lruvec_pgdat(lruvec)->lruvec == lruvec;
+}
+#endif
 
 extern unsigned long lruvec_lru_size(struct lruvec *lruvec, enum lru_list lru, int zone_idx);
 

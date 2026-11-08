@@ -1,18 +1,3 @@
-/*
- * MTK ECC controller driver.
- * Copyright (C) 2016  MediaTek Inc.
- * Authors:	Xiaolei Li		<xiaolei.li@mediatek.com>
- *		Jorge Ramirez-Ortiz	<jorge.ramirez-ortiz@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
 
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
@@ -263,8 +248,9 @@ static void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 
 static struct mtk_ecc *mtk_ecc_get(struct device_node *np)
 {
+	struct mtk_ecc *ecc = NULL;
 	struct platform_device *pdev;
-	struct mtk_ecc *ecc;
+	int ret;
 
 	pdev = of_find_device_by_node(np);
 	if (!pdev || !platform_get_drvdata(pdev))
@@ -272,7 +258,15 @@ static struct mtk_ecc *mtk_ecc_get(struct device_node *np)
 
 	get_device(&pdev->dev);
 	ecc = platform_get_drvdata(pdev);
-	clk_prepare_enable(ecc->clk);
+	if (ecc == NULL) {
+		pr_info("failed to get ecc point.\n");
+		return NULL;
+	}
+	ret = clk_prepare_enable(ecc->clk);
+	if (ret) {
+		pr_info("failed to enable clk.\n");
+		return NULL;
+	}
 	mtk_ecc_hw_init(ecc);
 
 	return ecc;

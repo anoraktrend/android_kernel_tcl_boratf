@@ -63,6 +63,12 @@ struct mutex {
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lockdep_map	dep_map;
 #endif
+// #ifdef VENDOR_EDIT
+// #ifdef CONFIG_TCL_UXEXPRESS
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+	struct task_struct *ux_task;
+// #endif
+// #endif /* VENDOR_EDIT */
 };
 
 /*
@@ -125,12 +131,26 @@ do {									\
 # define __DEP_MAP_MUTEX_INITIALIZER(lockname)
 #endif
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+// #ifdef CONFIG_TCL_UXEXPRESS
+#define __MUTEX_INITIALIZER(lockname) \
+		{ .owner = ATOMIC_LONG_INIT(0) \
+		, .wait_lock = __SPIN_LOCK_UNLOCKED(lockname.wait_lock) \
+		, .wait_list = LIST_HEAD_INIT(lockname.wait_list) \
+		, .ux_task = NULL \
+		__DEBUG_MUTEX_INITIALIZER(lockname) \
+		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
+//#else
+/*
 #define __MUTEX_INITIALIZER(lockname) \
 		{ .owner = ATOMIC_LONG_INIT(0) \
 		, .wait_lock = __SPIN_LOCK_UNLOCKED(lockname.wait_lock) \
 		, .wait_list = LIST_HEAD_INIT(lockname.wait_list) \
 		__DEBUG_MUTEX_INITIALIZER(lockname) \
 		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
+*/
+//#endif
 
 #define DEFINE_MUTEX(mutexname) \
 	struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)

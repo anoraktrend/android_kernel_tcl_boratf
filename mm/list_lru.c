@@ -144,6 +144,30 @@ bool list_lru_add(struct list_lru *lru, struct list_head *item)
 }
 EXPORT_SYMBOL_GPL(list_lru_add);
 
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@KERNEL, 2022/08/25 add for protect_lru
+#if defined(CONFIG_MEMCG_PROTECT_LRU)
+void list_lru_move(struct list_lru *lru, struct list_head *item)
+{
+	int nid = page_to_nid(virt_to_page(item));
+	struct list_lru_node *nlru = &lru->node[nid];
+	struct list_lru_one *l = NULL;
+
+	spin_lock(&nlru->lock);
+	l = list_lru_from_kmem(nlru, item, NULL);
+	if (unlikely(list_empty(item))) {
+		list_add_tail(item, &l->list);
+		l->nr_items++;
+		nlru->nr_items++;
+	} else {
+		list_move_tail(item, &l->list);
+	}
+	spin_unlock(&nlru->lock);
+}
+EXPORT_SYMBOL_GPL(list_lru_move);
+#endif
+// #endif /* VENDOR_EDIT */
+
 bool list_lru_del(struct list_lru *lru, struct list_head *item)
 {
 	int nid = page_to_nid(virt_to_page(item));

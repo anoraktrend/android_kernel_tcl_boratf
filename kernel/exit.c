@@ -67,7 +67,18 @@
 #include <asm/unistd.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
-
+// #ifdef VENDOR_EDIT
+// bin4.zhong@ARCH, 2021/01/19, add for sched-opt CONFIG_TCL_UXEXPRESS
+#ifdef CONFIG_TCL_UXEXPRESS
+#include <tcl/ktc.h>
+#endif
+// #endif /* VENDOR_EDIT */
+// #ifdef VENDOR_EDIT
+// zhipeng5_wei@kernel 2020/12/11 add for Top-CPU-utilization-Proces
+#ifdef CONFIG_TCL_PERF_MONITOR
+extern void record_released_process(struct task_struct *ptsk);
+#endif
+// #endif /* VENDOR_EDIT */
 static void __unhash_process(struct task_struct *p, bool group_dead)
 {
 	nr_threads--;
@@ -151,6 +162,12 @@ static void __exit_signal(struct task_struct *tsk)
 	sig->inblock += task_io_get_inblock(tsk);
 	sig->oublock += task_io_get_oublock(tsk);
 	task_io_accounting_add(&sig->ioac, &tsk->ioac);
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@kernel 2021/09/03 add for io acct
+#ifdef CONFIG_TCL_IOACCT
+	task_io_accounting_add(&sig->io_swi, &tsk->io_swi[tsk->io_index]);
+#endif
+// #endif /* VENDOR_EDIT */
 	sig->sum_sched_runtime += tsk->se.sum_exec_runtime;
 	sig->nr_threads--;
 	__unhash_process(tsk, group_dead);
@@ -186,6 +203,14 @@ void release_task(struct task_struct *p)
 {
 	struct task_struct *leader;
 	int zap_leader;
+
+// #ifdef VENDOR_EDIT
+// zhipeng5_wei@kernel 2020/12/11 add for Top-CPU-utilization-Proces
+#ifdef CONFIG_TCL_PERF_MONITOR
+	if(p->tgid == p->pid)
+	    record_released_process(p);
+#endif
+// #endif /* VENDOR_EDIT */
 repeat:
 	/* don't need to get the RCU readlock here - the process is dead and
 	 * can't be modifying its own credentials. But shut RCU-lockdep up */
@@ -718,6 +743,7 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 	if (group_dead)
 		kill_orphaned_pgrp(tsk->group_leader, NULL);
 
+	tsk->exit_state = EXIT_ZOMBIE;
 	if (unlikely(tsk->ptrace)) {
 		int sig = thread_group_leader(tsk) &&
 				thread_group_empty(tsk) &&
@@ -824,6 +850,13 @@ void __noreturn do_exit(long code)
 	}
 
 	exit_signals(tsk);  /* sets PF_EXITING */
+
+// #ifdef VENDOR_EDIT
+// bin4.zhong@ARCH, 2021/01/19, add for sched-opt CONFIG_TCL_UXEXPRESS
+#ifdef CONFIG_TCL_UXEXPRESS
+	sched_exit(tsk);
+#endif
+// #endif /* VENDOR_EDIT */
 
 	/* sync mm's RSS info before statistics gathering */
 	if (tsk->mm)
@@ -1126,6 +1159,13 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
 			psig->cmaxrss = maxrss;
 		task_io_accounting_add(&psig->ioac, &p->ioac);
 		task_io_accounting_add(&psig->ioac, &sig->ioac);
+		// #ifdef VENDOR_EDIT
+		// xiwu1.peng@kernel 2021/09/03 add for io acct
+		#ifdef CONFIG_TCL_IOACCT
+		task_io_accounting_add(&psig->io_swi, &p->io_swi[p->io_index]);
+		task_io_accounting_add(&psig->io_swi, &sig->io_swi);
+		#endif
+		// #endif /* VENDOR_EDIT */
 		write_sequnlock(&psig->stats_lock);
 		spin_unlock_irq(&current->sighand->siglock);
 	}

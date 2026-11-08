@@ -1,16 +1,3 @@
-/*
- * Copyright (c) 2017 MediaTek Inc.
- * Author: Weiyi Lu <weiyi.lu@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
 
 #include <linux/clk-provider.h>
 #include <linux/platform_device.h>
@@ -132,6 +119,8 @@ static const struct mtk_gate mm_clks[] = {
 	GATE_MM2(CLK_MM_DSI2_DIGITAL, "mm_dsi2_digital", "dsi0_lntc", 4),
 	GATE_MM2(CLK_MM_DSI3, "mm_dsi3", "mm_sel", 5),
 	GATE_MM2(CLK_MM_DSI3_DIGITAL, "mm_dsi3_digital", "dsi1_lntc", 6),
+	GATE_MM2(CLK_MM_DISP_PWM2_MM, "mm_pwm2_mm", "mm_sel", 7),
+	GATE_MM2(CLK_MM_DISP_PWM2_26M, "mm_pwm2_26m", "pwm_sel", 8),
 };
 
 static int clk_mt2712_mm_probe(struct platform_device *pdev)

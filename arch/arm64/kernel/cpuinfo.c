@@ -34,6 +34,12 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/delay.h>
+#include <linux/of_fdt.h>
+
+char* (*arch_read_hardware_id)(void);
+EXPORT_SYMBOL(arch_read_hardware_id);
+
+static const char *machine_name;
 
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
@@ -51,6 +57,9 @@ static char *icache_policy_str[] = {
 };
 
 unsigned long __icache_flags;
+
+/* machine descriptor for arm64 device */
+static const char *machine_desc_str;
 
 static const char *const hwcap_str[] = {
 	"fp",
@@ -75,6 +84,7 @@ static const char *const hwcap_str[] = {
 	"sm4",
 	"asimddp",
 	"sha512",
+	"ssbs",
 	"sve",
 	"asimdfhm",
 	"dit",
@@ -121,6 +131,24 @@ static const char *const compat_hwcap2_str[] = {
 	NULL
 };
 #endif /* CONFIG_COMPAT */
+/*Begin add by peisong.cao for 11669097*/
+#ifdef CONFIG_TCT_DEVICEINFO
+extern void set_cpu_devinfo(const char *name);
+extern char CPU_module_name[256];
+#endif
+/*End add by peisong.cao for 11669097*/
+
+/* setup machine descriptor */
+void machine_desc_set(const char *str)
+{
+	machine_desc_str = str;
+/*Begin add by peisong.cao for 11669097*/
+#ifdef CONFIG_TCT_DEVICEINFO
+	sprintf(CPU_module_name, str);
+        set_cpu_devinfo(CPU_module_name);
+#endif
+/*End add by peisong.cao for 11669097*/
+}
 
 static int c_show(struct seq_file *m, void *v)
 {
@@ -176,6 +204,14 @@ static int c_show(struct seq_file *m, void *v)
 		seq_printf(m, "CPU part\t: 0x%03x\n", MIDR_PARTNUM(midr));
 		seq_printf(m, "CPU revision\t: %d\n\n", MIDR_REVISION(midr));
 	}
+
+	if (!arch_read_hardware_id)
+		seq_printf(m, "Hardware\t: %s\n", machine_name);
+	else
+		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
+
+	/* backward-compatibility for third-party applications */
+	seq_printf(m, "Hardware\t: %s\n", machine_desc_str);
 
 	return 0;
 }
@@ -334,6 +370,7 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 	info->reg_id_aa64dfr1 = read_cpuid(ID_AA64DFR1_EL1);
 	info->reg_id_aa64isar0 = read_cpuid(ID_AA64ISAR0_EL1);
 	info->reg_id_aa64isar1 = read_cpuid(ID_AA64ISAR1_EL1);
+	info->reg_id_aa64isar2 = read_cpuid(ID_AA64ISAR2_EL1);
 	info->reg_id_aa64mmfr0 = read_cpuid(ID_AA64MMFR0_EL1);
 	info->reg_id_aa64mmfr1 = read_cpuid(ID_AA64MMFR1_EL1);
 	info->reg_id_aa64mmfr2 = read_cpuid(ID_AA64MMFR2_EL1);
@@ -383,6 +420,7 @@ void __init cpuinfo_store_boot_cpu(void)
 
 	boot_cpu_data = *info;
 	init_cpu_features(&boot_cpu_data);
+	machine_name = of_flat_dt_get_machine_name();
 }
 
 device_initcall(cpuinfo_regs_init);

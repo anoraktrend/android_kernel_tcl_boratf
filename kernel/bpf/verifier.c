@@ -2521,7 +2521,13 @@ static int check_helper_call(struct bpf_verifier_env *env, int func_id, int insn
 	int i, err;
 
 	/* find function prototype */
-	if (func_id < 0 || func_id >= __BPF_FUNC_MAX_ID) {
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	if (func_id < 0 || ((func_id >= __BPF_FUNC_MAX_ID) &&
+		!((func_id > __BPF_TCL_FUNC_MIN_ID) && (func_id < __BPF_TCL_FUNC_MAX_ID)))) {
+	// #else
+	// if (func_id < 0 || func_id >= __BPF_FUNC_MAX_ID) {
+	// #endif /* VENDOR_EDIT */
 		verbose(env, "invalid func %s#%d\n", func_id_name(func_id),
 			func_id);
 		return -EINVAL;

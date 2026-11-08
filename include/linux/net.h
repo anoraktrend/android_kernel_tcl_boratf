@@ -25,6 +25,7 @@
 #include <linux/rcupdate.h>
 #include <linux/once.h>
 #include <linux/fs.h>
+#include <linux/android_kabi.h>
 
 #include <uapi/linux/net.h>
 
@@ -119,6 +120,11 @@ struct socket {
 	struct file		*file;
 	struct sock		*sk;
 	const struct proto_ops	*ops;
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	pid_t			pid;
+	pid_t			tpid;
+	// #endif /* VENDOR_EDIT */
 };
 
 struct vm_area_struct;
@@ -198,6 +204,11 @@ struct proto_ops {
 	int		(*sendmsg_locked)(struct sock *sk, struct msghdr *msg,
 					  size_t size);
 	int		(*set_rcvlowat)(struct sock *sk, int val);
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 
 #define DECLARE_SOCKADDR(type, dst, src)	\

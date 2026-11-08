@@ -1359,7 +1359,14 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	if (list_empty(&info->swaplist))
 		list_add_tail(&info->swaplist, &shmem_swaplist);
 
+// #ifdef VENDOR_EDIT
+// huan22.wang@tcl.com, 2021/10/14, Workingset protection/detection on the anonymous LRU list V7.0
+#ifndef CONFIG_REFAULT_IO_VMSCAN
 	if (add_to_swap_cache(page, swap, GFP_ATOMIC) == 0) {
+#else
+	if (add_to_swap_cache(page, swap, GFP_ATOMIC, NULL) == 0) {
+#endif
+// #endif /* VENDOR_EDIT */
 		spin_lock_irq(&info->lock);
 		shmem_recalc_inode(inode);
 		info->swapped++;
@@ -2173,6 +2180,24 @@ out_nomem:
 
 static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct shmem_inode_info *info = SHMEM_I(file_inode(file));
+
+	if (info->seals & F_SEAL_FUTURE_WRITE) {
+		/*
+		 * New PROT_WRITE and MAP_SHARED mmaps are not allowed when
+		 * "future write" seal active.
+		 */
+		if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_WRITE))
+			return -EPERM;
+
+		/*
+		 * Since the F_SEAL_FUTURE_WRITE seals allow for a MAP_SHARED
+		 * read-only mapping, take care to not allow mprotect to revert
+		 * protections.
+		 */
+		vma->vm_flags &= ~(VM_MAYWRITE);
+	}
+
 	file_accessed(file);
 	vma->vm_ops = &shmem_vm_ops;
 	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGE_PAGECACHE) &&
@@ -2436,8 +2461,9 @@ shmem_write_begin(struct file *file, struct address_space *mapping,
 	pgoff_t index = pos >> PAGE_SHIFT;
 
 	/* i_mutex is held by caller */
-	if (unlikely(info->seals & (F_SEAL_WRITE | F_SEAL_GROW))) {
-		if (info->seals & F_SEAL_WRITE)
+	if (unlikely(info->seals & (F_SEAL_GROW |
+				   F_SEAL_WRITE | F_SEAL_FUTURE_WRITE))) {
+		if (info->seals & (F_SEAL_WRITE | F_SEAL_FUTURE_WRITE))
 			return -EPERM;
 		if ((info->seals & F_SEAL_GROW) && pos + len > inode->i_size)
 			return -EPERM;
@@ -2700,7 +2726,7 @@ static long shmem_fallocate(struct file *file, int mode, loff_t offset,
 		DECLARE_WAIT_QUEUE_HEAD_ONSTACK(shmem_falloc_waitq);
 
 		/* protected by i_mutex */
-		if (info->seals & F_SEAL_WRITE) {
+		if (info->seals & (F_SEAL_WRITE | F_SEAL_FUTURE_WRITE)) {
 			error = -EPERM;
 			goto out;
 		}
@@ -3216,6 +3242,15 @@ static const struct xattr_handler shmem_trusted_xattr_handler = {
 	.set = shmem_xattr_handler_set,
 };
 
+//[SYSD SYS][tct_mfg]Begin added by kaiyi.chen for task 11662147 on 2021-11-04
+//should support user.* in production mode
+static const struct xattr_handler shmem_user_xattr_handler = {
+       .prefix = XATTR_USER_PREFIX,
+       .get = shmem_xattr_handler_get,
+       .set = shmem_xattr_handler_set,
+};
+
+//[SYSD SYS][tct_mfg]End added by kaiyi.chen for task 11662147 on 2021-11-04
 static const struct xattr_handler *shmem_xattr_handlers[] = {
 #ifdef CONFIG_TMPFS_POSIX_ACL
 	&posix_acl_access_xattr_handler,
@@ -3223,6 +3258,7 @@ static const struct xattr_handler *shmem_xattr_handlers[] = {
 #endif
 	&shmem_security_xattr_handler,
 	&shmem_trusted_xattr_handler,
+	&shmem_user_xattr_handler,//[SYSD SYS][tct_mfg]Added by kaiyi.chen for task 11662147 on 2021-11-04
 	NULL
 };
 

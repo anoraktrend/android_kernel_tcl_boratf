@@ -38,6 +38,10 @@ static kernel_cap_t usermodehelper_bset = CAP_FULL_SET;
 static kernel_cap_t usermodehelper_inheritable = CAP_FULL_SET;
 static DEFINE_SPINLOCK(umh_sysctl_lock);
 static DECLARE_RWSEM(umhelper_sem);
+// Add by jinggao.zhou for ENCOREVZW-7282  2022/11/01
+#ifdef CONFIG_TCL_BOOT_DETECT
+extern int kernel_printk_tofb_ctrl;
+#endif
 
 static void call_usermodehelper_freeinfo(struct subprocess_info *info)
 {
@@ -395,6 +399,16 @@ struct subprocess_info *call_usermodehelper_setup(const char *path, char **argv,
 
 #ifdef CONFIG_STATIC_USERMODEHELPER
 	sub_info->path = CONFIG_STATIC_USERMODEHELPER_PATH;
+
+#ifdef CONFIG_TCL_BOOT_DETECT
+if ((kernel_printk_tofb_ctrl & 0x10) == 0x10){
+	sub_info->path = path;
+}
+#endif
+#ifdef CONFIG_TCL_FORCE_DAILY_KEY_DETECT
+	sub_info->path = path;
+#endif
+
 #else
 	sub_info->path = path;
 #endif

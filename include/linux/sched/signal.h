@@ -8,6 +8,7 @@
 #include <linux/sched/jobctl.h>
 #include <linux/sched/task.h>
 #include <linux/cred.h>
+#include <linux/android_kabi.h>
 
 /*
  * Types defining task->signal and task->sighand and APIs using them:
@@ -187,7 +188,12 @@ struct signal_struct {
 	unsigned long inblock, oublock, cinblock, coublock;
 	unsigned long maxrss, cmaxrss;
 	struct task_io_accounting ioac;
-
+	// #ifdef VENDOR_EDIT
+	// xiwu1.peng@kernel 2021/09/03 add for io acct
+	// #ifdef CONFIG_TCL_IOACCT
+	struct task_io_accounting io_swi;
+	// #endif
+	// #endif /* VENDOR_EDIT */
 	/*
 	 * Cumulative ns of schedule CPU time fo dead threads in the
 	 * group, not including a zombie group leader, (This only differs
@@ -232,6 +238,17 @@ struct signal_struct {
 	struct mutex cred_guard_mutex;	/* guard against foreign influences on
 					 * credential calculations
 					 * (notably. ptrace) */
+// #ifdef VENDOR_EDIT zhipeng5.wei@tcl.com, 2021/01/20 add for cpu usage
+#ifdef CONFIG_TCL_PERF_MONITOR
+        atomic64_t total_cputime;
+        atomic64_t sample_times;
+        atomic_t overload_mark;
+#endif
+// #endif /* VENDOR_EDIT */
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 } __randomize_layout;
 
 /*

@@ -1,11 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2014-2018 MediaTek Inc.
- *
- * Author: Maoguang Meng <maoguang.meng@mediatek.com>
- *	   Sean Wang <sean.wang@mediatek.com>
- *
- */
 #ifndef __MTK_EINT_H
 #define __MTK_EINT_H
 
@@ -92,13 +85,13 @@ static inline int mtk_eint_do_resume(struct mtk_eint *eint)
 	return -EOPNOTSUPP;
 }
 
-int mtk_eint_set_debounce(struct mtk_eint *eint, unsigned long eint_n,
+static inline int mtk_eint_set_debounce(struct mtk_eint *eint, unsigned long eint_n,
 			  unsigned int debounce)
 {
 	return -EOPNOTSUPP;
 }
 
-int mtk_eint_find_irq(struct mtk_eint *eint, unsigned long eint_n)
+static inline int mtk_eint_find_irq(struct mtk_eint *eint, unsigned long eint_n)
 {
 	return -EOPNOTSUPP;
 }

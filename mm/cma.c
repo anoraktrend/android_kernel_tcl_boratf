@@ -38,8 +38,23 @@
 #include <linux/kmemleak.h>
 #include <trace/events/cma.h>
 
+#include <linux/sched/clock.h>
+// #ifdef VENDOR_EDIT
+// Jiajun.xu@ARCH 2020/6/20 add for Healthinfo
+#ifdef CONFIG_TCL_CMA
+#include <tcl/tcl_cma.h>
+#endif
+// #endif /* VENDOR_EDIT */
+
 #include "cma.h"
 
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+#include <tcl/tcl_healthinfo.h>
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 struct cma cma_areas[MAX_CMA_AREAS];
 unsigned cma_area_count;
 static DEFINE_MUTEX(cma_mutex);
@@ -48,16 +63,19 @@ phys_addr_t cma_get_base(const struct cma *cma)
 {
 	return PFN_PHYS(cma->base_pfn);
 }
+EXPORT_SYMBOL(cma_get_base);
 
 unsigned long cma_get_size(const struct cma *cma)
 {
 	return cma->count << PAGE_SHIFT;
 }
+EXPORT_SYMBOL(cma_get_size);
 
 const char *cma_get_name(const struct cma *cma)
 {
 	return cma->name ? cma->name : "(undefined)";
 }
+EXPORT_SYMBOL_GPL(cma_get_name);
 
 static unsigned long cma_bitmap_aligned_mask(const struct cma *cma,
 					     unsigned int align_order)
@@ -427,9 +445,16 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 	unsigned long pfn = -1;
 	unsigned long start = 0;
 	unsigned long bitmap_maxno, bitmap_no, bitmap_count;
+	size_t i;
 	struct page *page = NULL;
 	int ret = -ENOMEM;
-
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+	#ifdef CONFIG_TCL_HEALTHINFO
+	unsigned long alloc_start = jiffies;
+	#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 	if (!cma || !cma->count)
 		return NULL;
 
@@ -438,6 +463,13 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 
 	if (!count)
 		return NULL;
+// #ifdef VENDOR_EDIT
+// Jiajun.xu@ARCH 2020/6/20 add for ion
+#ifdef CONFIG_TCL_CMA
+	unsigned long long in_tick = sched_clock();
+	unsigned long long timeout = 2ULL * 1000000 * (1 + ((count * PAGE_SIZE) >> 20));
+#endif
+// #endif /* VENDOR_EDIT */
 
 	mask = cma_bitmap_aligned_mask(cma, align);
 	offset = cma_bitmap_aligned_offset(cma, align);
@@ -466,8 +498,16 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 
 		pfn = cma->base_pfn + (bitmap_no << cma->order_per_bit);
 		mutex_lock(&cma_mutex);
+// #ifdef VENDOR_EDIT
+// Jiajun.xu@ARCH 2020/6/20 add for ion
+#ifdef CONFIG_TCL_CMA
+		ret = tcl_alloc_contig_range(pfn, pfn + count, MIGRATE_CMA,
+					 GFP_KERNEL | (no_warn ? __GFP_NOWARN : 0));
+#else
 		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_CMA,
 				     GFP_KERNEL | (no_warn ? __GFP_NOWARN : 0));
+#endif
+// #endif /* VENDOR_EDIT */
 		mutex_unlock(&cma_mutex);
 		if (ret == 0) {
 			page = pfn_to_page(pfn);
@@ -483,8 +523,24 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 		/* try again with a bit different memory target */
 		start = bitmap_no + mask + 1;
 	}
-
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+	cma_alloc_monitor(count, jiffies_to_msecs(jiffies - alloc_start));
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 	trace_cma_alloc(pfn, page, count, align);
+
+	/*
+	 * CMA can allocate multiple page blocks, which results in different
+	 * blocks being marked with different tags. Reset the tags to ignore
+	 * those page blocks.
+	 */
+	if (page) {
+		for (i = 0; i < count; i++)
+			page_kasan_tag_reset(page + i);
+	}
 
 	if (ret && !no_warn) {
 		pr_err("%s: alloc failed, req-size: %zu pages, ret: %d\n",
@@ -495,6 +551,7 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 	pr_debug("%s(): returned %p\n", __func__, page);
 	return page;
 }
+EXPORT_SYMBOL_GPL(cma_alloc);
 
 /**
  * cma_release() - release allocated pages
@@ -528,6 +585,7 @@ bool cma_release(struct cma *cma, const struct page *pages, unsigned int count)
 
 	return true;
 }
+EXPORT_SYMBOL_GPL(cma_release);
 
 int cma_for_each_area(int (*it)(struct cma *cma, void *data), void *data)
 {
@@ -542,3 +600,4 @@ int cma_for_each_area(int (*it)(struct cma *cma, void *data), void *data)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(cma_for_each_area);

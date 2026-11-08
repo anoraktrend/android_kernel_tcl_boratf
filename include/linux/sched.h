@@ -26,8 +26,10 @@
 #include <linux/sched/prio.h>
 #include <linux/signal_types.h>
 #include <linux/mm_types_task.h>
+#include <linux/mm_event.h>
 #include <linux/task_io_accounting.h>
 #include <linux/rseq.h>
+#include <linux/android_kabi.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -279,6 +281,18 @@ struct vtime {
 	u64			gtime;
 };
 
+/*
+ * Utilization clamp constraints.
+ * @UCLAMP_MIN:	Minimum utilization
+ * @UCLAMP_MAX:	Maximum utilization
+ * @UCLAMP_CNT:	Utilization clamp constraints count
+ */
+enum uclamp_id {
+	UCLAMP_MIN = 0,
+	UCLAMP_MAX,
+	UCLAMP_CNT
+};
+
 struct sched_info {
 #ifdef CONFIG_SCHED_INFO
 	/* Cumulative counters: */
@@ -309,6 +323,17 @@ struct sched_info {
  */
 # define SCHED_FIXEDPOINT_SHIFT		10
 # define SCHED_FIXEDPOINT_SCALE		(1L << SCHED_FIXEDPOINT_SHIFT)
+
+/* Increase resolution of cpu_capacity calculations */
+# define SCHED_CAPACITY_SHIFT		SCHED_FIXEDPOINT_SHIFT
+# define SCHED_CAPACITY_SCALE		(1L << SCHED_CAPACITY_SHIFT)
+
+static inline unsigned int scale_from_percent(unsigned int pct)
+{
+	WARN_ON(pct > 100);
+
+	return ((SCHED_FIXEDPOINT_SCALE * pct) / 100);
+}
 
 struct load_weight {
 	unsigned long			weight;
@@ -355,12 +380,6 @@ struct util_est {
  * For cfs_rq, it is the aggregated load_avg of all runnable and
  * blocked sched_entities.
  *
- * load_avg may also take frequency scaling into account:
- *
- *   load_avg = runnable% * scale_load_down(load) * freq%
- *
- * where freq% is the CPU frequency normalized to the highest frequency.
- *
  * [util_avg definition]
  *
  *   util_avg = running% * SCHED_CAPACITY_SCALE
@@ -369,17 +388,14 @@ struct util_est {
  * a CPU. For cfs_rq, it is the aggregated util_avg of all runnable
  * and blocked sched_entities.
  *
- * util_avg may also factor frequency scaling and CPU capacity scaling:
+ * load_avg and util_avg don't direcly factor frequency scaling and CPU
+ * capacity scaling. The scaling is done through the rq_clock_pelt that
+ * is used for computing those signals (see update_rq_clock_pelt())
  *
- *   util_avg = running% * SCHED_CAPACITY_SCALE * freq% * capacity%
- *
- * where freq% is the same as above, and capacity% is the CPU capacity
- * normalized to the greatest capacity (due to uarch differences, etc).
- *
- * N.B., the above ratios (runnable%, running%, freq%, and capacity%)
- * themselves are in the range of [0, 1]. To do fixed point arithmetics,
- * we therefore scale them to as large a range as necessary. This is for
- * example reflected by util_avg's SCHED_CAPACITY_SCALE.
+ * N.B., the above ratios (runnable% and running%) themselves are in the
+ * range of [0, 1]. To do fixed point arithmetics, we therefore scale them
+ * to as large a range as necessary. This is for example reflected by
+ * util_avg's SCHED_CAPACITY_SCALE.
  *
  * [Overflow issue]
  *
@@ -478,6 +494,11 @@ struct sched_entity {
 	 */
 	struct sched_avg		avg;
 #endif
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 
 struct sched_rt_entity {
@@ -496,6 +517,11 @@ struct sched_rt_entity {
 	/* rq "owned" by this entity/group: */
 	struct rt_rq			*my_q;
 #endif
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 } __randomize_layout;
 
 struct sched_dl_entity {
@@ -567,6 +593,41 @@ struct sched_dl_entity {
 	struct hrtimer inactive_timer;
 };
 
+#ifdef CONFIG_UCLAMP_TASK
+/* Number of utilization clamp buckets (shorter alias) */
+#define UCLAMP_BUCKETS CONFIG_UCLAMP_BUCKETS_COUNT
+
+/*
+ * Utilization clamp for a scheduling entity
+ * @value:		clamp value "assigned" to a se
+ * @bucket_id:		bucket index corresponding to the "assigned" value
+ * @active:		the se is currently refcounted in a rq's bucket
+ * @user_defined:	the requested clamp value comes from user-space
+ *
+ * The bucket_id is the index of the clamp bucket matching the clamp value
+ * which is pre-computed and stored to avoid expensive integer divisions from
+ * the fast path.
+ *
+ * The active bit is set whenever a task has got an "effective" value assigned,
+ * which can be different from the clamp value "requested" from user-space.
+ * This allows to know a task is refcounted in the rq's bucket corresponding
+ * to the "effective" bucket_id.
+ *
+ * The user_defined bit is set whenever a task has got a task-specific clamp
+ * value requested from userspace, i.e. the system defaults apply to this task
+ * just as a restriction. This allows to relax default clamps when a less
+ * restrictive task-specific value has been requested, thus allowing to
+ * implement a "nice" semantic. For example, a task running with a 20%
+ * default boost can still drop its own boosting to 0%.
+ */
+struct uclamp_se {
+	unsigned int value		: bits_per(SCHED_CAPACITY_SCALE);
+	unsigned int bucket_id		: bits_per(UCLAMP_BUCKETS);
+	unsigned int active		: 1;
+	unsigned int user_defined	: 1;
+};
+#endif /* CONFIG_UCLAMP_TASK */
+
 union rcu_special {
 	struct {
 		u8			blocked;
@@ -613,6 +674,14 @@ struct task_struct {
 	unsigned int			flags;
 	unsigned int			ptrace;
 
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_TCL_HEALTHINFO
+        u64 rtstart_time;
+        u64 rtend_time;
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 #ifdef CONFIG_SMP
 	struct llist_node		wake_entry;
 	int				on_cpu;
@@ -635,6 +704,9 @@ struct task_struct {
 	int				wake_cpu;
 #endif
 	int				on_rq;
+#ifdef CONFIG_MTK_SCHED_CPU_PREFER
+	int				cpu_prefer;
+#endif
 
 	int				prio;
 	int				static_prio;
@@ -644,10 +716,25 @@ struct task_struct {
 	const struct sched_class	*sched_class;
 	struct sched_entity		se;
 	struct sched_rt_entity		rt;
+
+	/* task boost vendor fields */
+	u64				last_sleep_ts;
+	int				boost;
+	u64				boost_period;
+	u64				boost_expires;
+	u64				last_enqueued_ts;
+
 #ifdef CONFIG_CGROUP_SCHED
 	struct task_group		*sched_task_group;
 #endif
 	struct sched_dl_entity		dl;
+
+#ifdef CONFIG_UCLAMP_TASK
+	/* Clamp values requested for a scheduling entity */
+	struct uclamp_se		uclamp_req[UCLAMP_CNT];
+	/* Effective clamp values used for a scheduling entity */
+	struct uclamp_se		uclamp[UCLAMP_CNT];
+#endif
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	/* List of struct preempt_notifier: */
@@ -661,6 +748,7 @@ struct task_struct {
 	unsigned int			policy;
 	int				nr_cpus_allowed;
 	cpumask_t			cpus_allowed;
+	cpumask_t			cpus_requested;
 
 #ifdef CONFIG_PREEMPT_RCU
 	int				rcu_read_lock_nesting;
@@ -710,6 +798,10 @@ struct task_struct {
 	unsigned			sched_contributes_to_load:1;
 	unsigned			sched_migrated:1;
 	unsigned			sched_remote_wakeup:1;
+#ifdef CONFIG_PSI
+	unsigned			sched_psi_wake_requeue:1;
+#endif
+
 	/* Force alignment to the next boundary: */
 	unsigned			:0;
 
@@ -718,6 +810,11 @@ struct task_struct {
 	/* Bit to tell LSMs we're in execve(): */
 	unsigned			in_execve:1;
 	unsigned			in_iowait:1;
+	// #ifdef VENDOR_EDIT
+	// zhipeng5.wei@arch 2020/11/25 add for ux thread CONFIG_TCL_UXEXPRESS
+	unsigned			in_binder_sleep:1;
+	unsigned			in_futex_sleep:1;
+	// #endif /* VENDOR_EDIT */
 #ifndef TIF_RESTORE_SIGMASK
 	unsigned			restore_sigmask:1;
 #endif
@@ -799,6 +896,10 @@ struct task_struct {
 	u64				stimescaled;
 #endif
 	u64				gtime;
+#ifdef CONFIG_CPU_FREQ_TIMES
+	u64				*time_in_state;
+	unsigned int			max_state;
+#endif
 	struct prev_cputime		prev_cputime;
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	struct vtime			vtime;
@@ -906,7 +1007,10 @@ struct task_struct {
 	/* Deadlock detection and priority inheritance handling: */
 	struct rt_mutex_waiter		*pi_blocked_on;
 #endif
-
+#ifdef CONFIG_MM_EVENT_STAT
+	struct mm_event_task	mm_event[MM_TYPE_NUM];
+	unsigned long		next_period;
+#endif
 #ifdef CONFIG_DEBUG_MUTEXES
 	/* Mutex deadlock detection: */
 	struct mutex_waiter		*blocked_on;
@@ -963,6 +1067,10 @@ struct task_struct {
 	siginfo_t			*last_siginfo;
 
 	struct task_io_accounting	ioac;
+#ifdef CONFIG_PSI
+	/* Pressure stall state */
+	unsigned int			psi_flags;
+#endif
 #ifdef CONFIG_TASK_XACCT
 	/* Accumulated RSS usage: */
 	u64				acct_rss_mem1;
@@ -996,8 +1104,6 @@ struct task_struct {
 #endif
 	struct list_head		pi_state_list;
 	struct futex_pi_state		*pi_state_cache;
-	struct mutex			futex_exit_mutex;
-	unsigned int			futex_state;
 #endif
 #ifdef CONFIG_PERF_EVENTS
 	struct perf_event_context	*perf_event_ctxp[perf_nr_task_contexts];
@@ -1145,6 +1251,8 @@ struct task_struct {
 #endif /* CONFIG_TRACING */
 
 #ifdef CONFIG_KCOV
+	/* See kernel/kcov.c for more details. */
+
 	/* Coverage collection mode enabled for this task (0 if disabled): */
 	unsigned int			kcov_mode;
 
@@ -1156,6 +1264,12 @@ struct task_struct {
 
 	/* KCOV descriptor wired with this task or NULL: */
 	struct kcov			*kcov;
+
+	/* KCOV common handle for remote coverage collection: */
+	u64				kcov_handle;
+
+	/* KCOV sequence number: */
+	int				kcov_sequence;
 #endif
 
 #ifdef CONFIG_MEMCG
@@ -1195,12 +1309,74 @@ struct task_struct {
 	/* A live task holds one reference: */
 	atomic_t			stack_refcount;
 #endif
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+// #ifdef CONFIG_TCL_UXEXPRESS
+	int static_ux;
+	atomic64_t dynamic_ux;
+	struct list_head ux_entry;
+	int ux_depth;
+	u64 dynamic_ux_start;
+	u64 enqueue_time;
+	int parent_ux;
+	raw_spinlock_t uxlock_lock;
+	void *uxlock_owner;
+	atomic_t vruntime_flag;
+	int uxlock_type;
+	void *ktc_group;            // struct ktc_group pointer
+	struct list_head owner_list;
+	struct list_head ktc_list;
+	struct rw_semaphore *ux_rwsem;
+	atomic_t rw_flag;
+// #ifdef VENDOR_EDIT
+// shu5.zhang@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	int all_cpu_flag;
+#endif
+// #endif /* VENDOR_EDIT */
+	unsigned int benchmark_flag;
+// #endif
+// xiwu1.peng@KERNEL, 2022/08/29 add for process reclaim
+#if defined(CONFIG_TCL_ADDR_RECLAIM) && defined(CONFIG_TCL_FREEZE)
+	atomic_t thaw_flag;     // bit0 1:thawed just now; bit1 1:in reclaim
+#endif
+// #endif /* VENDOR_EDIT */
 #ifdef CONFIG_LIVEPATCH
 	int patch_state;
 #endif
 #ifdef CONFIG_SECURITY
 	/* Used by LSM modules for access restriction: */
 	void				*security;
+#endif
+	/* task is frozen/stopped (used by the cgroup freezer) */
+	ANDROID_KABI_USE(1, unsigned frozen:1);
+
+	/* 095444fad7e3 ("futex: Replace PF_EXITPIDONE with a state") */
+	ANDROID_KABI_USE(2, unsigned int futex_state);
+
+	/*
+	 * f9b0c6c556db ("futex: Add mutex around futex exit")
+	 * A struct mutex takes 32 bytes, or 4 64bit entries, so pick off
+	 * 4 of the reserved members, and replace them with a struct mutex.
+	 * Do the GENKSYMS hack to work around the CRC issues
+	 */
+#ifdef __GENKSYMS__
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
+	ANDROID_KABI_RESERVE(5);
+	ANDROID_KABI_RESERVE(6);
+#else
+	struct mutex			futex_exit_mutex;
+#endif
+
+	ANDROID_KABI_RESERVE(7);
+	ANDROID_KABI_RESERVE(8);
+#ifdef CONFIG_MTK_TASK_TURBO
+	unsigned short turbo:1;
+	unsigned short render:1;
+	unsigned short inherit_cnt:14;
+	short nice_backup;
+	atomic_t inherit_types;
 #endif
 
 	/*
@@ -1209,6 +1385,11 @@ struct task_struct {
 	 */
 	randomized_struct_fields_end
 
+// xiwu1.peng@kernel 2021/09/03 add for io acct
+// #ifdef CONFIG_TCL_IOACCT
+	struct task_io_accounting	io_swi[2];
+	bool io_index;
+// #endif
 	/* CPU-specific state of this task: */
 	struct thread_struct		thread;
 
@@ -1379,6 +1560,19 @@ extern struct pid *cad_pid;
  */
 #define PF_IDLE			0x00000002	/* I am an IDLE thread */
 #define PF_EXITING		0x00000004	/* Getting shut down */
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2023/02/06 add for ux isolate
+#ifdef CONFIG_TCL_UXEXPRESS
+/*
+ * Ux task can not preempt task with PF_UX_ISOLATE, and also can
+ * not pick the rq which links this task.
+ * For ux performance task should not keep this flag for long time.
+ */
+#define PF_UX_ISOLATE	0x00000008
+#endif
+// #endif /* VENDOR_EDIT */
+
 #define PF_VCPU			0x00000010	/* I'm a virtual CPU */
 #define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */
 #define PF_FORKNOEXEC		0x00000040	/* Forked but didn't exec */
@@ -1399,8 +1593,10 @@ extern struct pid *cad_pid;
 #define PF_KTHREAD		0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
+#define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
 #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
+#define PF_MEMALLOC_NOCMA	0x10000000	/* All allocation request will have _GFP_MOVABLE cleared */
 #define PF_MUTEX_TESTER		0x20000000	/* Thread belongs to the rt mutex tester */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
@@ -1451,6 +1647,22 @@ static inline bool is_percpu_thread(void)
 #define PFA_SPEC_SSB_FORCE_DISABLE	4	/* Speculative Store Bypass force disabled*/
 #define PFA_SPEC_IB_DISABLE		5	/* Indirect branch speculation restricted */
 #define PFA_SPEC_IB_FORCE_DISABLE	6	/* Indirect branch speculation permanently restricted */
+#ifndef CONFIG_TCL_FREEZE
+#define PFA_NO_FREEZE			7	//[TCT-ROM][PERF]Add by jingyuan.wei for freezer on 2019/09/05
+#endif
+
+#ifndef CONFIG_CGROUP_IOLIMIT
+//[TCT-ROM]begin added by xizheng.mo for 9572106 blkio type on 20200716
+#define PFA_IN_PAGEFAULT	27
+//[TCT-ROM]End added by xizheng.mo for 9572106 blkio type on 20200716
+#endif
+
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@kernel 2021/09/03 add for iolimit
+#ifdef CONFIG_CGROUP_IOLIMIT
+#define PFA_IN_PAGEFAULT		29
+#endif
+// #endif /* VENDOR_EDIT */
 
 #define TASK_PFA_TEST(name, func)					\
 	static inline bool task_##func(struct task_struct *p)		\
@@ -1488,6 +1700,31 @@ TASK_PFA_CLEAR(SPEC_IB_DISABLE, spec_ib_disable)
 
 TASK_PFA_TEST(SPEC_IB_FORCE_DISABLE, spec_ib_force_disable)
 TASK_PFA_SET(SPEC_IB_FORCE_DISABLE, spec_ib_force_disable)
+
+#ifndef CONFIG_TCL_FREEZE
+//[TCT-ROM][PERF]Begin Modify by jingyuan.wei for freezer on 2019/09/05
+TASK_PFA_TEST(NO_FREEZE, no_freeze)
+TASK_PFA_SET(NO_FREEZE, no_freeze)
+TASK_PFA_CLEAR(NO_FREEZE, no_freeze)
+//[TCT-ROM][PERF]End Modify by jingyuan.wei for freezer on 2019/09/05
+#endif
+
+#ifndef CONFIG_CGROUP_IOLIMIT
+//[TCT-ROM]begin added by xizheng.mo for 9572106 blkio type on 20200716
+TASK_PFA_TEST(IN_PAGEFAULT, in_pagefault)
+TASK_PFA_SET(IN_PAGEFAULT, in_pagefault)
+TASK_PFA_CLEAR(IN_PAGEFAULT, in_pagefault)
+//[TCT-ROM]End added by xizheng.mo for 9572106 blkio type on 20200716
+#endif
+
+// #ifdef VENDOR_EDIT
+// xiwu1.peng@kernel 2021/09/03 add for iolimit
+#ifdef CONFIG_CGROUP_IOLIMIT
+TASK_PFA_TEST(IN_PAGEFAULT, in_pagefault)
+TASK_PFA_SET(IN_PAGEFAULT, in_pagefault)
+TASK_PFA_CLEAR(IN_PAGEFAULT, in_pagefault)
+#endif
+// #endif /* VENDOR_EDIT */
 
 static inline void
 current_restore_flags(unsigned long orig_flags, unsigned long flags)

@@ -27,6 +27,20 @@
 #include <linux/prefetch.h>
 
 #include <trace/events/block.h>
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+#include <trace/events/fgio.h>
+#endif
+// #endif /* VENDOR_EDIT */
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2023/02/06 add for ux isolate
+#ifdef CONFIG_TCL_UXEXPRESS
+#include <tcl/tcl_uxthread.h>
+#include <trace/events/uxexpress_tcl.h>
+#endif
+// #endif /* VENDOR_EDIT */
 
 #include <linux/blk-mq.h>
 #include "blk.h"
@@ -36,6 +50,7 @@
 #include "blk-stat.h"
 #include "blk-mq-sched.h"
 #include "blk-rq-qos.h"
+#include "mtk_mmc_block.h"
 
 static bool blk_mq_poll(struct request_queue *q, blk_qc_t cookie);
 static void blk_mq_poll_stats_start(struct request_queue *q);
@@ -711,15 +726,34 @@ static void blk_mq_requeue_work(struct work_struct *work)
 		 * data, so insert it to hctx dispatch list to avoid any
 		 * merge.
 		 */
-		if (rq->rq_flags & RQF_DONTPREP)
+		if (rq->rq_flags & RQF_DONTPREP) {
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+			trace_blk_mq_requeue_work(rq, true, false);
+#endif
+// #endif /* VENDOR_EDIT */
 			blk_mq_request_bypass_insert(rq, false);
-		else
+		} else {
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+			trace_blk_mq_requeue_work(rq, false, true);
+#endif
+// #endif /* VENDOR_EDIT */
 			blk_mq_sched_insert_request(rq, true, false, false);
+		}
 	}
 
 	while (!list_empty(&rq_list)) {
 		rq = list_entry(rq_list.next, struct request, queuelist);
 		list_del_init(&rq->queuelist);
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+		trace_blk_mq_requeue_work(rq, false, false);
+#endif
+// #endif /* VENDOR_EDIT */
 		blk_mq_sched_insert_request(rq, false, false, false);
 	}
 
@@ -1200,6 +1234,13 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 			bd.last = !blk_mq_get_driver_tag(nxt);
 		}
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+		trace_blk_mq_dispatch_rq_list(rq, got_budget);
+#endif
+// #endif /* VENDOR_EDIT */
+
 		ret = q->mq_ops->queue_rq(hctx, &bd);
 		if (ret == BLK_STS_RESOURCE || ret == BLK_STS_DEV_RESOURCE) {
 			blk_mq_handle_dev_resource(rq, list);
@@ -1287,6 +1328,14 @@ static void __blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx)
 {
 	int srcu_idx;
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2023/02/06 add for ux isolate
+#ifdef CONFIG_TCL_UXEXPRESS
+	set_curr_ux_isolate();
+	trace_block_ux_isolate(true);
+#endif
+// #endif /* VENDOR_EDIT */
+
 	/*
 	 * We should be running this queue from one of the CPUs that
 	 * are mapped to it.
@@ -1323,6 +1372,14 @@ static void __blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx)
 	hctx_lock(hctx, &srcu_idx);
 	blk_mq_sched_dispatch_requests(hctx);
 	hctx_unlock(hctx, srcu_idx);
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2023/02/06 add for ux isolate
+#ifdef CONFIG_TCL_UXEXPRESS
+	clear_curr_ux_isolate();
+	trace_block_ux_isolate(false);
+#endif
+// #endif /* VENDOR_EDIT */
 }
 
 static inline int blk_mq_first_mapped_cpu(struct blk_mq_hw_ctx *hctx)
@@ -1479,6 +1536,7 @@ EXPORT_SYMBOL(blk_mq_queue_stopped);
  */
 void blk_mq_stop_hw_queue(struct blk_mq_hw_ctx *hctx)
 {
+	mt_bio_queue_free(current);
 	cancel_delayed_work(&hctx->run_work);
 
 	set_bit(BLK_MQ_S_STOPPED, &hctx->state);
@@ -1593,6 +1651,12 @@ void blk_mq_request_bypass_insert(struct request *rq, bool run_queue)
 	struct blk_mq_ctx *ctx = rq->mq_ctx;
 	struct blk_mq_hw_ctx *hctx = blk_mq_map_queue(rq->q, ctx->cpu);
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	trace_blk_mq_request_bypass_insert(rq);
+#endif
+// #endif /* VENDOR_EDIT */
 	spin_lock(&hctx->lock);
 	list_add_tail(&rq->queuelist, &hctx->dispatch);
 	spin_unlock(&hctx->lock);
@@ -2201,7 +2265,6 @@ static int blk_mq_init_hctx(struct request_queue *q,
 	node = hctx->numa_node;
 	if (node == NUMA_NO_NODE)
 		node = hctx->numa_node = set->numa_node;
-
 	INIT_DELAYED_WORK(&hctx->run_work, blk_mq_run_work_fn);
 	spin_lock_init(&hctx->lock);
 	INIT_LIST_HEAD(&hctx->dispatch);

@@ -9,6 +9,7 @@
 #include <linux/types.h>
 #include <linux/bvec.h>
 #include <linux/ktime.h>
+#include <linux/android_kabi.h>
 
 struct bio_set;
 struct bio;
@@ -18,6 +19,7 @@ struct block_device;
 struct io_context;
 struct cgroup_subsys_state;
 typedef void (bio_end_io_t) (struct bio *);
+struct bio_crypt_ctx;
 
 /*
  * Block error status values.  See block/blk-core:blk_errors for the details.
@@ -182,6 +184,14 @@ struct bio {
 	struct blkcg_gq		*bi_blkg;
 	struct bio_issue	bi_issue;
 #endif
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct bio_crypt_ctx	*bi_crypt_context;
+#if IS_ENABLED(CONFIG_DM_DEFAULT_KEY)
+	bool			bi_skip_dm_default_key;
+#endif
+#endif
+
 	union {
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
 		struct bio_integrity_payload *bi_integrity; /* data integrity */
@@ -190,6 +200,19 @@ struct bio {
 
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
 
+#ifdef CONFIG_MTK_HW_FDE
+		/*
+		 * MTK PATH:
+		 *
+		 * Indicating this bio request needs encryption or decryption by
+		 * HW FDE (Full Disk Encryption) engine.
+		 *
+		 * Set by DM Crypt.
+		 * Quried by HW FDE engine driver, e.g., eMMC/UFS.
+		 */
+		unsigned int		bi_hw_fde;
+		unsigned int		bi_key_idx;
+#endif
 	/*
 	 * Everything starting with bi_max_vecs will be preserved by bio_reset()
 	 */
@@ -201,6 +224,18 @@ struct bio {
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;
+
+	ktime_t bi_alloc_ts;			/* for mm_event */
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@ARCH, 2021-11-30 add for f2fs antiaging
+#ifdef CONFIG_BLK_TCL_EXT
+	bool inflight;
+#endif
+// #endif /*VENDOR_EDIT*/
 
 	/*
 	 * We can inline a number of vecs at the end of the bio, to avoid
@@ -220,14 +255,15 @@ struct bio {
 #define BIO_BOUNCED	3	/* bio is a bounce bio */
 #define BIO_USER_MAPPED 4	/* contains user pages */
 #define BIO_NULL_MAPPED 5	/* contains invalid user pages */
-#define BIO_QUIET	6	/* Make BIO Quiet */
-#define BIO_CHAIN	7	/* chained bio, ->bi_remaining in effect */
-#define BIO_REFFED	8	/* bio has elevated ->bi_cnt */
-#define BIO_THROTTLED	9	/* This bio has already been subjected to
+#define BIO_WORKINGSET	6	/* contains userspace workingset pages */
+#define BIO_QUIET	7	/* Make BIO Quiet */
+#define BIO_CHAIN	8	/* chained bio, ->bi_remaining in effect */
+#define BIO_REFFED	9	/* bio has elevated ->bi_cnt */
+#define BIO_THROTTLED	10	/* This bio has already been subjected to
 				 * throttling rules. Don't do it again. */
-#define BIO_TRACE_COMPLETION 10	/* bio_endio() should trace the final completion
+#define BIO_TRACE_COMPLETION 11	/* bio_endio() should trace the final completion
 				 * of this bio. */
-#define BIO_QUEUE_ENTERED 11	/* can use blk_queue_enter_live() */
+#define BIO_QUEUE_ENTERED 12	/* can use blk_queue_enter_live() */
 
 /* See BVEC_POOL_OFFSET below before adding new flags */
 
@@ -321,13 +357,18 @@ enum req_flag_bits {
 	__REQ_RAHEAD,		/* read ahead, can fail anytime */
 	__REQ_BACKGROUND,	/* background IO */
 	__REQ_NOWAIT,           /* Don't wait if request will block */
-
 	/* command specific flags for REQ_OP_WRITE_ZEROES: */
 	__REQ_NOUNMAP,		/* do not free blocks when zeroing */
 
 	/* for driver use */
 	__REQ_DRV,
 	__REQ_SWAP,		/* swapping request. */
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	__REQ_FG,		/* foreground */
+#endif
+// #endif /* VENDOR_EDIT */
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -342,10 +383,15 @@ enum req_flag_bits {
 #define REQ_INTEGRITY		(1ULL << __REQ_INTEGRITY)
 #define REQ_FUA			(1ULL << __REQ_FUA)
 #define REQ_PREFLUSH		(1ULL << __REQ_PREFLUSH)
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+#define REQ_FG			(1ULL << __REQ_FG)
+#endif
+// #endif /* VENDOR_EDIT */
 #define REQ_RAHEAD		(1ULL << __REQ_RAHEAD)
 #define REQ_BACKGROUND		(1ULL << __REQ_BACKGROUND)
 #define REQ_NOWAIT		(1ULL << __REQ_NOWAIT)
-
 #define REQ_NOUNMAP		(1ULL << __REQ_NOUNMAP)
 
 #define REQ_DRV			(1ULL << __REQ_DRV)

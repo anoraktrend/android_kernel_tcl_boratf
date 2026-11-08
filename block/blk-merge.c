@@ -12,6 +12,13 @@
 
 #include "blk.h"
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+#include <tcl/tcl_fgio.h>
+#endif
+// #endif /* VENDOR_EDIT */
+
 static struct bio *blk_bio_discard_split(struct request_queue *q,
 					 struct bio *bio,
 					 struct bio_set *bs,
@@ -417,9 +424,10 @@ static int __blk_bios_map_sg(struct request_queue *q, struct bio *bio,
 	int cluster = blk_queue_cluster(q), nsegs = 0;
 
 	for_each_bio(bio)
-		bio_for_each_segment(bvec, bio, iter)
+		bio_for_each_segment(bvec, bio, iter) {
 			__blk_segment_map_sg(q, &bvec, sglist, &bvprv, sg,
 					     &nsegs, &cluster);
+		}
 
 	return nsegs;
 }
@@ -514,6 +522,8 @@ int ll_back_merge_fn(struct request_queue *q, struct request *req,
 		req_set_nomerge(q, req);
 		return 0;
 	}
+	if (!bio_crypt_ctx_mergeable(req->bio, blk_rq_bytes(req), bio))
+		return 0;
 	if (!bio_flagged(req->biotail, BIO_SEG_VALID))
 		blk_recount_segments(q, req->biotail);
 	if (!bio_flagged(bio, BIO_SEG_VALID))
@@ -536,6 +546,8 @@ int ll_front_merge_fn(struct request_queue *q, struct request *req,
 		req_set_nomerge(q, req);
 		return 0;
 	}
+	if (!bio_crypt_ctx_mergeable(bio, bio->bi_iter.bi_size, req->bio))
+		return 0;
 	if (!bio_flagged(bio, BIO_SEG_VALID))
 		blk_recount_segments(q, bio);
 	if (!bio_flagged(req->bio, BIO_SEG_VALID))
@@ -610,6 +622,9 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 		return 0;
 
 	if (blk_integrity_merge_rq(q, req, next) == false)
+		return 0;
+
+	if (!bio_crypt_ctx_mergeable(req->bio, blk_rq_bytes(req), next->bio))
 		return 0;
 
 	/* Merge is OK... */
@@ -704,6 +719,14 @@ static struct request *attempt_merge(struct request_queue *q,
 
 	if (req_op(req) != req_op(next))
 		return NULL;
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	if (req_op_fg(req) != req_op_fg(next))
+		return NULL;
+#endif
+// #endif /* VENDOR_EDIT */
 
 	if (rq_data_dir(req) != rq_data_dir(next)
 	    || req->rq_disk != next->rq_disk
@@ -835,6 +858,14 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 	if (req_op(rq) != bio_op(bio))
 		return false;
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	if (req_op_fg(rq) != bio_op_fg(bio))
+		return false;
+#endif
+// #endif /* VENDOR_EDIT */
+
 	/* different data direction or already started, don't merge */
 	if (bio_data_dir(bio) != rq_data_dir(rq))
 		return false;
@@ -857,6 +888,10 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 	 * non-hint IO.
 	 */
 	if (rq->write_hint != bio->bi_write_hint)
+		return false;
+
+	/* Only merge if the crypt contexts are compatible */
+	if (!bio_crypt_ctx_compatible(bio, rq->bio))
 		return false;
 
 	return true;

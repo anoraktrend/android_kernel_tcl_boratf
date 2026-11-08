@@ -68,10 +68,16 @@
 #include <linux/freezer.h>
 #include <linux/bootmem.h>
 #include <linux/fault-inject.h>
-
 #include <asm/futex.h>
 
 #include "locking/rtmutex_common.h"
+
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+#include <tcl/tcl_uxthread.h>
+#endif
+// #endif /* VENDOR_EDIT */
 
 /*
  * READ this before attempting to hack on futexes!
@@ -243,6 +249,12 @@ struct futex_q {
 	struct plist_node list;
 
 	struct task_struct *task;
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+// #ifdef CONFIG_TCL_UXEXPRESS
+	int wait_for;
+// #endif
+// #endif /* VENDOR_EDIT */
 	spinlock_t *lock_ptr;
 	union futex_key key;
 	struct futex_pi_state *pi_state;
@@ -267,6 +279,10 @@ struct futex_hash_bucket {
 	spinlock_t lock;
 	struct plist_head chain;
 } ____cacheline_aligned_in_smp;
+
+#ifdef CONFIG_MTK_TASK_TURBO
+#include <mt-plat/task_turbo_futex.h>
+#endif
 
 /*
  * The base of the bucket array and its size are always used together
@@ -1683,6 +1699,13 @@ futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bitset)
 	if (!hb_waiters_pending(hb))
 		goto out_put_key;
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	futex_dynamic_ux_dequeue(current);
+#endif
+// #endif /* VENDOR_EDIT */
+
 	spin_lock(&hb->lock);
 
 	plist_for_each_entry_safe(this, next, &hb->chain, list) {
@@ -2348,10 +2371,21 @@ static inline void __queue_me(struct futex_q *q, struct futex_hash_bucket *hb)
 	 * Thus, all RT-threads are woken first in priority order, and
 	 * the others are woken last, in FIFO order.
 	 */
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	prio = get_futex_prio(current);
+#else
 	prio = min(current->normal_prio, MAX_RT_PRIO);
+#endif
+// #endif /* VENDOR_EDIT */
 
 	plist_node_init(&q->list, prio);
+#ifdef CONFIG_MTK_TASK_TURBO
+	futex_plist_add(q, hb);
+#else
 	plist_add(&q->list, &hb->chain);
+#endif
 	q->task = current;
 }
 
@@ -2701,6 +2735,9 @@ static void futex_wait_queue_me(struct futex_hash_bucket *hb, struct futex_q *q,
 	 * queue_me() calls spin_unlock() upon completion, both serializing
 	 * access to the hash list and forcing another memory barrier.
 	 */
+#ifdef CONFIG_TCL_UXEXPRESS
+	int old_futex_sleep = current->in_futex_sleep;
+#endif
 	set_current_state(TASK_INTERRUPTIBLE);
 	queue_me(q, hb);
 
@@ -2718,10 +2755,30 @@ static void futex_wait_queue_me(struct futex_hash_bucket *hb, struct futex_q *q,
 		 * flagged for rescheduling. Only call schedule if there
 		 * is no timeout, or if it has yet to expire.
 		 */
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+		if (!timeout || timeout->task) {
+			futex_dynamic_ux_enqueue(q->wait_for, current, (void *)q);
+			current->in_futex_sleep = 1;
+			freezable_schedule();
+			current->in_futex_sleep = old_futex_sleep;
+		}
+#else
 		if (!timeout || timeout->task)
 			freezable_schedule();
+#endif
+// #endif /* VENDOR_EDIT */
+
 	}
 	__set_current_state(TASK_RUNNING);
+
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	clear_reverse_flag(current);
+#endif
+// #endif /* VENDOR_EDIT */
 }
 
 /**
@@ -2800,8 +2857,16 @@ out:
 	return ret;
 }
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
+              ktime_t *abs_time, u32 __user *uaddr2, u32 bitset)
+#else
 static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
 		      ktime_t *abs_time, u32 bitset)
+#endif
+// #endif /* VENDOR_EDIT */
 {
 	struct hrtimer_sleeper timeout, *to = NULL;
 	struct restart_block *restart;
@@ -2812,6 +2877,18 @@ static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
 	if (!bitset)
 		return -EINVAL;
 	q.bitset = bitset;
+
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	if (q.bitset == FUTEX_BITSET_MATCH_ANY)
+		q.wait_for = get_futex_task_pid(uaddr2);
+//	if (verify_dynamic_ux(current)) {
+//		trace_printk("futex :%s, bitset:%x, ux:%d, addr2:%p\n", current->comm, q.bitset, verify_dynamic_ux(current), uaddr2);
+//	}
+#endif
+// #endif /* VENDOR_EDIT */
+
 
 	if (abs_time) {
 		to = &timeout;
@@ -2863,6 +2940,12 @@ retry:
 	restart->futex.bitset = bitset;
 	restart->futex.flags = flags | FLAGS_HAS_TIMEOUT;
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	restart->futex.uaddr2 = uaddr2;
+#endif
+// #endif /* VENDOR_EDIT */
 	ret = set_restart_fn(restart, futex_wait_restart);
 
 out:
@@ -2885,8 +2968,16 @@ static long futex_wait_restart(struct restart_block *restart)
 	}
 	restart->fn = do_no_restart_syscall;
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	return (long)futex_wait(uaddr, restart->futex.flags,
+				restart->futex.val, tp, restart->futex.uaddr2, restart->futex.bitset);
+#else
 	return (long)futex_wait(uaddr, restart->futex.flags,
 				restart->futex.val, tp, restart->futex.bitset);
+#endif
+// #endif /* VENDOR_EDIT */
 }
 
 
@@ -3886,7 +3977,14 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 		val3 = FUTEX_BITSET_MATCH_ANY;
 		/* fall through */
 	case FUTEX_WAIT_BITSET:
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+		return futex_wait(uaddr, flags, val, timeout, uaddr2, val3);
+#else
 		return futex_wait(uaddr, flags, val, timeout, val3);
+#endif
+// #endif /* VENDOR_EDIT */
 	case FUTEX_WAKE:
 		val3 = FUTEX_BITSET_MATCH_ANY;
 		/* fall through */

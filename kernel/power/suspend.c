@@ -32,8 +32,11 @@
 #include <trace/events/power.h>
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
+#include <linux/wakeup_reason.h>
 
 #include "power.h"
+
+#define MTK_SOLUTION 1
 
 const char * const pm_labels[] = {
 	[PM_SUSPEND_TO_IDLE] = "freeze",
@@ -60,6 +63,22 @@ static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_s2idle_ops *s2idle_ops;
 static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
 
+/* Begin added by dapeng.qiao for task 11038299 on 2021-05-1 */
+#ifdef TCT_BMS_SW_SUPPORT
+bool bms_sw_support = false;
+EXPORT_SYMBOL(bms_sw_support);
+static int __init get_bms_sw_support(char *str) {//__maybe_unused
+    if (!strncmp(str, "enable", 6))
+        bms_sw_support = true;
+    else
+        bms_sw_support = false;
+    pr_err("__setup bms_sw_support= %d\n", bms_sw_support);
+    return 1;
+}
+__setup("androidboot.bms_sw_support=", get_bms_sw_support);
+#endif
+/* End added by dapeng.qiao for task 11038299 on 2021-05-1 */
+
 enum s2idle_states __read_mostly s2idle_state;
 static DEFINE_RAW_SPINLOCK(s2idle_lock);
 
@@ -75,6 +94,7 @@ void s2idle_set_ops(const struct platform_s2idle_ops *ops)
 	s2idle_ops = ops;
 	unlock_system_sleep();
 }
+EXPORT_SYMBOL_GPL(s2idle_set_ops);
 
 static void s2idle_begin(void)
 {
@@ -154,6 +174,7 @@ static void s2idle_loop(void)
 			break;
 
 		pm_wakeup_clear(false);
+		clear_wakeup_reasons();
 	}
 
 	pm_pr_dbg("resume from suspend-to-idle\n");
@@ -367,6 +388,7 @@ static int suspend_prepare(suspend_state_t state)
 	if (!error)
 		return 0;
 
+	log_suspend_abort_reason("One or more tasks refusing to freeze");
 	suspend_stats.failed_freeze++;
 	dpm_save_failed_step(SUSPEND_FREEZE);
  Finish:
@@ -396,7 +418,7 @@ void __weak arch_suspend_enable_irqs(void)
  */
 static int suspend_enter(suspend_state_t state, bool *wakeup)
 {
-	int error;
+	int error, last_dev;
 
 	error = platform_suspend_prepare(state);
 	if (error)
@@ -404,7 +426,11 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 
 	error = dpm_suspend_late(PMSG_SUSPEND);
 	if (error) {
+		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
+		last_dev %= REC_FAILED_NUM;
 		pr_err("late suspend of devices failed\n");
+		log_suspend_abort_reason("late suspend of %s device failed",
+					 suspend_stats.failed_devs[last_dev]);
 		goto Platform_finish;
 	}
 	error = platform_suspend_prepare_late(state);
@@ -418,7 +444,11 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 
 	error = dpm_suspend_noirq(PMSG_SUSPEND);
 	if (error) {
+		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
+		last_dev %= REC_FAILED_NUM;
 		pr_err("noirq suspend of devices failed\n");
+		log_suspend_abort_reason("noirq suspend of %s device failed",
+					 suspend_stats.failed_devs[last_dev]);
 		goto Platform_early_resume;
 	}
 	error = platform_suspend_prepare_noirq(state);
@@ -429,8 +459,10 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		goto Platform_wake;
 
 	error = disable_nonboot_cpus();
-	if (error || suspend_test(TEST_CPUS))
+	if (error || suspend_test(TEST_CPUS)) {
+		log_suspend_abort_reason("Disabling non-boot cpus failed");
 		goto Enable_cpus;
+	}
 
 	arch_suspend_disable_irqs();
 	BUG_ON(!irqs_disabled());
@@ -498,6 +530,8 @@ int suspend_devices_and_enter(suspend_state_t state)
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
 		pr_err("Some devices failed to suspend, or early wake event detected\n");
+		log_suspend_abort_reason(
+				"Some devices failed to suspend, or early wake event detected");
 		goto Recover_platform;
 	}
 	suspend_test_finish("suspend devices");
@@ -539,6 +573,62 @@ static void suspend_finish(void)
 	pm_restore_console();
 }
 
+#if MTK_SOLUTION
+
+#define SYS_SYNC_TIMEOUT 2000
+
+static int sys_sync_ongoing;
+
+static void suspend_sys_sync(struct work_struct *work);
+static struct workqueue_struct *suspend_sys_sync_work_queue;
+DECLARE_WORK(suspend_sys_sync_work, suspend_sys_sync);
+
+static void suspend_sys_sync(struct work_struct *work)
+{
+	pr_debug("++\n");
+	ksys_sync();
+	sys_sync_ongoing = 0;
+	pr_debug("--\n");
+}
+
+int suspend_syssync_enqueue(void)
+{
+	int timeout = 0;
+
+	if (suspend_sys_sync_work_queue == NULL) {
+		suspend_sys_sync_work_queue =
+			create_singlethread_workqueue("fs_suspend_syssync");
+		if (suspend_sys_sync_work_queue == NULL) {
+			pr_info("fs_suspend_syssync workqueue create failed\n");
+			return -EBUSY;
+		}
+	}
+
+	while (timeout < SYS_SYNC_TIMEOUT) {
+		if (!sys_sync_ongoing)
+			break;
+		msleep(100);
+		timeout += 100;
+	}
+
+	if (!sys_sync_ongoing) {
+		sys_sync_ongoing = 1;
+		queue_work(suspend_sys_sync_work_queue, &suspend_sys_sync_work);
+		while (timeout < SYS_SYNC_TIMEOUT) {
+			if (!sys_sync_ongoing)
+				return 0;
+			msleep(100);
+			timeout += 100;
+		}
+	}
+
+	return -EBUSY;
+}
+
+
+#endif
+
+
 /**
  * enter_state - Do common work needed to enter system sleep state.
  * @state: System sleep state to enter.
@@ -571,7 +661,15 @@ static int enter_state(suspend_state_t state)
 #ifndef CONFIG_SUSPEND_SKIP_SYNC
 	trace_suspend_resume(TPS("sync_filesystems"), 0, true);
 	pr_info("Syncing filesystems ... ");
+#if MTK_SOLUTION
+	error = suspend_syssync_enqueue();
+	if (error) {
+		pr_info("sys_sync timeout.\n");
+		goto Unlock;
+	}
+#else
 	ksys_sync();
+#endif
 	pr_cont("done.\n");
 	trace_suspend_resume(TPS("sync_filesystems"), 0, false);
 #endif

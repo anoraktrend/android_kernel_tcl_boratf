@@ -17,6 +17,19 @@
 #include <linux/mfd/syscon.h>
 #include <linux/reboot-mode.h>
 
+/* Begin added by mingbo.feng for defect-11514515  on 2021-09-22 */
+#if defined(CONFIG_EMMC_RESET_PIN)
+#if defined(CONFIG_MTK_PMIC_WRAP)
+#include <linux/regmap.h>
+#include <linux/soc/mediatek/pmic_wrap.h>
+#include <linux/mfd/mt6357/registers.h>
+static struct regmap *regmap;
+#endif
+#define RTC_PDN1_RECOVERY_MASK      0x0030
+#define RTC_PDN1_FAC_RESET      (1U << 4)
+#define RTC_PDN1_FAST_BOOT      (1U << 13)
+#endif
+/* End added by mingbo.feng for defect-11514515  on 2021-09-22 */
 struct syscon_reboot_mode {
 	struct regmap *map;
 	struct reboot_mode_driver reboot;
@@ -29,14 +42,47 @@ static int syscon_reboot_mode_write(struct reboot_mode_driver *reboot,
 {
 	struct syscon_reboot_mode *syscon_rbm;
 	int ret;
-
+/* Begin added by mingbo.feng for defect-11514515  on 2021-09-22 */
+#if defined(CONFIG_EMMC_RESET_PIN)
+	int reg_val=0;
+#endif
+/* End added by mingbo.feng for defect-11514515  on 2021-09-22 */
 	syscon_rbm = container_of(reboot, struct syscon_reboot_mode, reboot);
 
 	ret = regmap_update_bits(syscon_rbm->map, syscon_rbm->offset,
 				 syscon_rbm->mask, magic);
 	if (ret < 0)
 		dev_err(reboot->dev, "update reboot mode bits failed\n");
+/* Begin added by mingbo.feng for defect-11514515  on 2021-09-22 */
+#if defined(CONFIG_EMMC_RESET_PIN)
+        if(magic ==3){//for bootloader
+            regmap_read(regmap, MT6357_RTC_PDN1_ADDR, &reg_val);
+            pr_err(" Bootloader: MT6357_RTC_PDN1  =%x\n",reg_val);
 
+            reg_val = reg_val | RTC_PDN1_FAST_BOOT;
+           regmap_update_bits(regmap, MT6357_RTC_PDN1_ADDR,MT6357_RTC_PDN1_MASK,reg_val);
+	    msleep(1);
+	    regmap_update_bits(regmap, MT6357_RTC_WRTGR,MT6357_WRTGR_MASK, 1);
+
+            msleep(1);
+	    regmap_update_bits(regmap, MT6357_RG_CRST_ADDR,MT6357_RG_CRST_MASK<<MT6357_RG_CRST_SHIFT, 1<<MT6357_RG_CRST_SHIFT);
+	}
+
+      if(magic ==2){//for recovery
+
+            regmap_read(regmap, MT6357_RTC_PDN1_ADDR, &reg_val);
+            pr_err("Recovery: MT6357_RTC_PDN1 =%x\n",reg_val);
+
+            reg_val = reg_val | RTC_PDN1_FAC_RESET;
+            regmap_update_bits(regmap, MT6357_RTC_PDN1_ADDR,MT6357_RTC_PDN1_MASK,reg_val);
+	    msleep(1);
+            regmap_update_bits(regmap, MT6357_RTC_WRTGR,MT6357_WRTGR_MASK, 1);
+
+	    msleep(1);
+            regmap_update_bits(regmap, MT6357_RG_CRST_ADDR,MT6357_RG_CRST_MASK<<MT6357_RG_CRST_SHIFT, 1<<MT6357_RG_CRST_SHIFT);
+	}
+#endif
+/* End added by mingbo.feng for 11514515  on 2021-09-22 */
 	return ret;
 }
 
@@ -44,7 +90,13 @@ static int syscon_reboot_mode_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct syscon_reboot_mode *syscon_rbm;
-
+/* Begin added by mingbo.feng for defect- 11514515  on 2021-09-22 */
+#if defined(CONFIG_EMMC_RESET_PIN)
+#if defined(CONFIG_MTK_PMIC_WRAP)
+        struct device_node *pwrap_node;
+#endif
+#endif
+/* End added by mingbo.feng for defect-11514515  on 2021-09-22 */
 	syscon_rbm = devm_kzalloc(&pdev->dev, sizeof(*syscon_rbm), GFP_KERNEL);
 	if (!syscon_rbm)
 		return -ENOMEM;
@@ -62,7 +114,16 @@ static int syscon_reboot_mode_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	of_property_read_u32(pdev->dev.of_node, "mask", &syscon_rbm->mask);
-
+/* Begin added by mingbo.feng for defect- 11514515  on 2021-09-22 */
+#if defined(CONFIG_EMMC_RESET_PIN)
+#if defined(CONFIG_MTK_PMIC_WRAP)
+	pwrap_node = of_parse_phandle(pdev->dev.of_node,"mediatek,pwrap-regmap", 0);
+	if (!pwrap_node)
+		return -ENODEV;
+	regmap = pwrap_node_to_regmap(pwrap_node);
+#endif
+#endif
+/* End added by mingbo.feng for defect-11514515  on 2021-09-22 */
 	ret = devm_reboot_mode_register(&pdev->dev, &syscon_rbm->reboot);
 	if (ret)
 		dev_err(&pdev->dev, "can't register reboot mode\n");

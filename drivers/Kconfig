@@ -57,6 +57,8 @@ source "drivers/char/Kconfig"
 
 source "drivers/i2c/Kconfig"
 
+source "drivers/i3c/Kconfig"
+
 source "drivers/spi/Kconfig"
 
 source "drivers/spmi/Kconfig"
@@ -195,6 +197,8 @@ source "drivers/thunderbolt/Kconfig"
 
 source "drivers/android/Kconfig"
 
+source "drivers/gpu/trace/Kconfig"
+
 source "drivers/nvdimm/Kconfig"
 
 source "drivers/dax/Kconfig"
@@ -219,4 +223,11 @@ source "drivers/siox/Kconfig"
 
 source "drivers/slimbus/Kconfig"
 
+source "drivers/interconnect/Kconfig"
+
+source "drivers/energy_model/Kconfig"
 endmenu
+
+# Begin added by hailong.chen for task 9783931 on 2020-08-13
+source "drivers/tct/Kconfig"
+# End added by hailong.chen for task 9783931 on 2020-08-13

@@ -555,6 +555,13 @@ struct socket *sock_alloc(void)
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
 	inode->i_op = &sockfs_inode_ops;
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	if (sock != NULL && current != NULL) {
+		sock->pid = current->tgid;
+		sock->tpid = current->pid;
+	}
+	// #endif /* VENDOR_EDIT */
 
 	return sock;
 }

@@ -244,7 +244,22 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		c_backtrace(fp, mode);
 }
 #endif
-
+// #ifdef VENDOR_EDIT
+// yipeng.jiang@tcl.com, 2022/09/08, add for tkperf
+#ifdef CONFIG_TKPERF
+#ifdef CONFIG_ARM_UNWIND
+void stack_trace_save_tsk(struct task_struct *tsk, char *buf, int size)
+{
+	return;//The 32-bit version is not currently supported
+}
+#else
+void stack_trace_save_tsk(struct task_struct *tsk, char *buf, int size)
+{
+	return;//The 32-bit version is not currently supported
+}
+#endif
+#endif
+// #endif /* VENDER_EDIT */
 void show_stack(struct task_struct *tsk, unsigned long *sp)
 {
 	dump_backtrace(NULL, tsk);

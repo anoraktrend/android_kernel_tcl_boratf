@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * MediaTek USB3.1 gen2 xsphy Driver
- *
- * Copyright (c) 2018 MediaTek Inc.
- * Author: Chunfeng Yun <chunfeng.yun@mediatek.com>
- *
- */
 
 #include <dt-bindings/phy/phy.h>
 #include <linux/clk.h>
@@ -426,7 +419,7 @@ static int mtk_phy_exit(struct phy *phy)
 	return 0;
 }
 
-static int mtk_phy_set_mode(struct phy *phy, enum phy_mode mode)
+static int mtk_phy_set_mode(struct phy *phy, enum phy_mode mode, int submode)
 {
 	struct xsphy_instance *inst = phy_get_drvdata(phy);
 	struct mtk_xsphy *xsphy = dev_get_drvdata(phy->dev.parent);

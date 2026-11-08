@@ -85,6 +85,30 @@ DEFINE_BINDER_FUNCTION_RETURN_EVENT(binder_ioctl_done);
 DEFINE_BINDER_FUNCTION_RETURN_EVENT(binder_write_done);
 DEFINE_BINDER_FUNCTION_RETURN_EVENT(binder_read_done);
 
+TRACE_EVENT(binder_set_priority,
+	TP_PROTO(int proc, int thread, unsigned int old_prio,
+		 unsigned int desired_prio, unsigned int new_prio),
+	TP_ARGS(proc, thread, old_prio, new_prio, desired_prio),
+
+	TP_STRUCT__entry(
+		__field(int, proc)
+		__field(int, thread)
+		__field(unsigned int, old_prio)
+		__field(unsigned int, new_prio)
+		__field(unsigned int, desired_prio)
+	),
+	TP_fast_assign(
+		__entry->proc = proc;
+		__entry->thread = thread;
+		__entry->old_prio = old_prio;
+		__entry->new_prio = new_prio;
+		__entry->desired_prio = desired_prio;
+	),
+	TP_printk("proc=%d thread=%d old=%d => new=%d desired=%d",
+		  __entry->proc, __entry->thread, __entry->old_prio,
+		  __entry->new_prio, __entry->desired_prio)
+);
+
 TRACE_EVENT(binder_wait_for_work,
 	TP_PROTO(bool proc_work, bool transaction_stack, bool thread_todo),
 	TP_ARGS(proc_work, transaction_stack, thread_todo),
@@ -131,6 +155,32 @@ TRACE_EVENT(binder_transaction,
 		  __entry->to_proc, __entry->to_thread,
 		  __entry->reply, __entry->flags, __entry->code)
 );
+
+#ifndef CONFIG_TCL_FREEZE
+TRACE_EVENT(binder_freeze_transaction,
+	TP_PROTO(int from, int to, const char* descriptor,
+		 int code, bool oneway),
+	TP_ARGS(from, to, descriptor, code, oneway),
+	TP_STRUCT__entry(
+		__field(int, from)
+		__field(int, to)
+		__array(char, descriptor, 100)
+                __field(int, code)
+		__field(bool, oneway)
+	),
+	TP_fast_assign(
+		__entry->from = from;
+		__entry->to = to;
+		memcpy(__entry->descriptor, descriptor, 100);
+                __entry->code = code;
+		__entry->oneway = oneway;
+	),
+	TP_printk("from=%d to=%d descriptor=%s code=%d oneway=%d",
+		  __entry->from, __entry->to,
+		  __entry->descriptor, __entry->code,
+		  __entry->oneway)
+);
+#endif
 
 TRACE_EVENT(binder_transaction_received,
 	TP_PROTO(struct binder_transaction *t),
@@ -275,7 +325,7 @@ DEFINE_EVENT(binder_buffer_class, binder_transaction_failed_buffer_release,
 
 TRACE_EVENT(binder_update_page_range,
 	TP_PROTO(struct binder_alloc *alloc, bool allocate,
-		 void *start, void *end),
+		 void __user *start, void __user *end),
 	TP_ARGS(alloc, allocate, start, end),
 	TP_STRUCT__entry(
 		__field(int, proc)
@@ -379,6 +429,53 @@ TRACE_EVENT(binder_return,
 		  _IOC_NR(__entry->cmd) < ARRAY_SIZE(binder_return_strings) ?
 			  binder_return_strings[_IOC_NR(__entry->cmd)] :
 			  "unknown")
+);
+
+DECLARE_EVENT_CLASS(bd_handle_thaw_class,
+
+	TP_PROTO(pid_t sender, pid_t target),
+
+	TP_ARGS(sender, target),
+
+	TP_STRUCT__entry(
+		__field(  pid_t,			sender		)
+		__field(  pid_t,			target		)
+	),
+
+	TP_fast_assign(
+		__entry->sender = sender;
+		__entry->target = target;
+	),
+
+	TP_printk("sender[%d] target[%d]", __entry->sender, __entry->target)
+);
+
+DEFINE_EVENT(bd_handle_thaw_class, bd_handle_thaw_sg,
+
+	TP_PROTO(pid_t sender, pid_t target),
+
+	TP_ARGS(sender, target)
+);
+
+DEFINE_EVENT(bd_handle_thaw_class, bd_handle_thaw_new,
+
+	TP_PROTO(pid_t sender, pid_t target),
+
+	TP_ARGS(sender, target)
+);
+
+DEFINE_EVENT(bd_handle_thaw_class, bd_handle_thaw_legacy,
+
+	TP_PROTO(pid_t sender, pid_t target),
+
+	TP_ARGS(sender, target)
+);
+
+DEFINE_EVENT(bd_handle_thaw_class, bd_handle_thaw_reply,
+
+	TP_PROTO(pid_t sender, pid_t target),
+
+	TP_ARGS(sender, target)
 );
 
 #endif /* _BINDER_TRACE_H */

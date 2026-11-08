@@ -26,6 +26,17 @@
 # define DEBUG_RWSEMS_WARN_ON(c)
 #endif
 
+enum rwsem_waiter_type {
+	RWSEM_WAITING_FOR_WRITE,
+	RWSEM_WAITING_FOR_READ
+};
+
+struct rwsem_waiter {
+	struct list_head list;
+	struct task_struct *task;
+	enum rwsem_waiter_type type;
+};
+
 #ifdef CONFIG_RWSEM_SPIN_ON_OWNER
 /*
  * All writes to owner are protected by WRITE_ONCE() to make sure that

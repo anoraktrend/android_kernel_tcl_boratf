@@ -69,6 +69,8 @@ obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
 
 obj-$(CONFIG_PARPORT)		+= parport/
 obj-$(CONFIG_NVM)		+= lightnvm/
+obj-$(CONFIG_SPI)               += spi/
+obj-$(CONFIG_MEMORY)		+= memory/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
 obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
 obj-$(CONFIG_DAX)		+= dax/
@@ -101,6 +103,14 @@ obj-$(CONFIG_ATA_OVER_ETH)	+= block/aoe/
 obj-$(CONFIG_PARIDE) 		+= block/paride/
 obj-$(CONFIG_TC)		+= tc/
 obj-$(CONFIG_UWB)		+= uwb/
+
+# Begin modified by jin.wang for task 11356632 on 2021-07-27
+ifdef CONFIG_TCT_INIT_SPEED_UP
+obj-$(CONFIG_OF)		+= of/
+obj-$(CONFIG_IIO)		+= iio/
+endif
+# End modified by jin.wang for task 11356632 on 2021-07-27
+
 obj-$(CONFIG_USB_PHY)		+= usb/
 obj-$(CONFIG_USB)		+= usb/
 obj-$(CONFIG_USB_SUPPORT)	+= usb/
@@ -112,6 +122,7 @@ obj-$(CONFIG_GAMEPORT)		+= input/gameport/
 obj-$(CONFIG_INPUT)		+= input/
 obj-$(CONFIG_RTC_LIB)		+= rtc/
 obj-y				+= i2c/ media/
+obj-y				+= i3c/
 obj-$(CONFIG_PPS)		+= pps/
 obj-y				+= ptp/
 obj-$(CONFIG_W1)		+= w1/
@@ -142,7 +153,13 @@ endif
 obj-$(CONFIG_DCA)		+= dca/
 obj-$(CONFIG_HID)		+= hid/
 obj-$(CONFIG_PPC_PS3)		+= ps3/
+
+# Begin modified by jin.wang for task 11356632 on 2021-07-27
+ifndef CONFIG_TCT_INIT_SPEED_UP
 obj-$(CONFIG_OF)		+= of/
+endif
+# End modified by jin.wang for task 11356632 on 2021-07-27
+
 obj-$(CONFIG_SSB)		+= ssb/
 obj-$(CONFIG_BCMA)		+= bcma/
 obj-$(CONFIG_VHOST_RING)	+= vhost/
@@ -157,14 +174,21 @@ obj-$(CONFIG_REMOTEPROC)	+= remoteproc/
 obj-$(CONFIG_RPMSG)		+= rpmsg/
 obj-$(CONFIG_SOUNDWIRE)		+= soundwire/
 
+obj-$(CONFIG_ENERGY_MODEL)	+= energy_model/
+
 # Virtualization drivers
 obj-$(CONFIG_VIRT_DRIVERS)	+= virt/
 obj-$(CONFIG_HYPERV)		+= hv/
 
 obj-$(CONFIG_PM_DEVFREQ)	+= devfreq/
 obj-$(CONFIG_EXTCON)		+= extcon/
-obj-$(CONFIG_MEMORY)		+= memory/
+
+# Begin modified by jin.wang for task 11356632 on 2021-07-27
+ifndef CONFIG_TCT_INIT_SPEED_UP
 obj-$(CONFIG_IIO)		+= iio/
+endif
+# End modified by jin.wang for task 11356632 on 2021-07-27
+
 obj-$(CONFIG_VME_BUS)		+= vme/
 obj-$(CONFIG_IPACK_BUS)		+= ipack/
 obj-$(CONFIG_NTB)		+= ntb/
@@ -186,3 +210,8 @@ obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_UNISYS_VISORBUS)	+= visorbus/
 obj-$(CONFIG_SIOX)		+= siox/
 obj-$(CONFIG_GNSS)		+= gnss/
+obj-$(CONFIG_INTERCONNECT)     += interconnect/
+
+# Begin added by hailong.chen for task 9783931 on 2020-08-13
+obj-y += tct/
+# End added by hailong.chen for task 9783931 on 2020-08-13

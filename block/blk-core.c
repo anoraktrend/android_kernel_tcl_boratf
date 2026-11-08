@@ -35,7 +35,27 @@
 #include <linux/blk-cgroup.h>
 #include <linux/debugfs.h>
 #include <linux/bpf.h>
+#include <linux/psi.h>
+#include <linux/blk-crypto.h>
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_RESOURCEMONITOR
+#include <resourcemonitor/iomonitor.h>
+#endif
 
+#if defined(CONFIG_TCL_HEALTHINFO) || defined(CONFIG_TCL_IOACCT)
+#include <tcl/tcl_healthinfo.h>
+#endif
+
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+#include <trace/events/zswapd_tcl.h>
+#endif
+// #endif /* VENDOR_EDIT */
+
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 #define CREATE_TRACE_POINTS
 #include <trace/events/block.h>
 
@@ -43,10 +63,18 @@
 #include "blk-mq.h"
 #include "blk-mq-sched.h"
 #include "blk-rq-qos.h"
+#include "mtk_mmc_block.h"
 
 #ifdef CONFIG_DEBUG_FS
 struct dentry *blk_debugfs_root;
 #endif
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+#include <tcl/tcl_fgio.h>
+#endif
+// #endif /* VENDOR_EDIT */
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
@@ -249,6 +277,13 @@ int blk_status_to_errno(blk_status_t status)
 }
 EXPORT_SYMBOL_GPL(blk_status_to_errno);
 
+#ifdef CONFIG_HELAEYE_BSP_EMMC_UFS_SD_ON
+#include <tcl/tkperf.h>
+extern int emmc_ufs_sd_lasterrcode;
+int sector_number=0;
+char hela_emmc_errinfo[128]={"emmc_ufs_sd_error"};
+#endif
+
 static void print_req_error(struct request *req, blk_status_t status)
 {
 	int idx = (__force int)status;
@@ -260,6 +295,14 @@ static void print_req_error(struct request *req, blk_status_t status)
 			   __func__, blk_errors[idx].name, req->rq_disk ?
 			   req->rq_disk->disk_name : "?",
 			   (unsigned long long)blk_rq_pos(req));
+
+#ifdef CONFIG_HELAEYE_BSP_EMMC_UFS_SD_ON
+      if(strncmp(req->rq_disk->disk_name,"loop",4)!=0){
+      sector_number=blk_rq_pos(req);
+      sprintf(hela_emmc_errinfo, "%s_%s_%d",blk_errors[idx].name,req->rq_disk->disk_name,sector_number);
+      emmc_ufs_sd_lasterrcode=BLOCKIO_ERROR;
+    }
+#endif
 }
 
 static void req_bio_endio(struct request *rq, struct bio *bio,
@@ -411,7 +454,7 @@ void blk_sync_queue(struct request_queue *q)
 	if (q->mq_ops) {
 		struct blk_mq_hw_ctx *hctx;
 		int i;
-
+		mt_bio_queue_free(current);
 		queue_for_each_hw_ctx(q, hctx, i)
 			cancel_delayed_work_sync(&hctx->run_work);
 	} else {
@@ -1059,7 +1102,6 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id,
 	mutex_init(&q->blk_trace_mutex);
 #endif
 	mutex_init(&q->sysfs_lock);
-	mutex_init(&q->sysfs_dir_lock);
 	spin_lock_init(&q->__queue_lock);
 
 	if (!q->mq_ops)
@@ -1985,6 +2027,13 @@ void blk_init_request_from_bio(struct request *req, struct bio *bio)
 	if (bio->bi_opf & REQ_RAHEAD)
 		req->cmd_flags |= REQ_FAILFAST_MASK;
 
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	trans_fgio_flag(bio, req);
+#endif
+// #endif /* VENDOR_EDIT */
+
 	req->__sector = bio->bi_iter.bi_sector;
 	if (ioprio_valid(bio_prio(bio)))
 		req->ioprio = bio_prio(bio);
@@ -2464,7 +2513,9 @@ blk_qc_t generic_make_request(struct bio *bio)
 			/* Create a fresh bio_list for all subordinate requests */
 			bio_list_on_stack[1] = bio_list_on_stack[0];
 			bio_list_init(&bio_list_on_stack[0]);
-			ret = q->make_request_fn(q, bio);
+
+			if (!blk_crypto_submit_bio(&bio))
+				ret = q->make_request_fn(q, bio);
 
 			/* sort new bios into those for a lower level
 			 * and those for the same level
@@ -2513,7 +2564,7 @@ blk_qc_t direct_make_request(struct bio *bio)
 {
 	struct request_queue *q = bio->bi_disk->queue;
 	bool nowait = bio->bi_opf & REQ_NOWAIT;
-	blk_qc_t ret;
+	blk_qc_t ret = BLK_QC_T_NONE;
 
 	if (!generic_make_request_checks(bio))
 		return BLK_QC_T_NONE;
@@ -2527,7 +2578,8 @@ blk_qc_t direct_make_request(struct bio *bio)
 		return BLK_QC_T_NONE;
 	}
 
-	ret = q->make_request_fn(q, bio);
+	if (!blk_crypto_submit_bio(&bio))
+		ret = q->make_request_fn(q, bio);
 	blk_queue_exit(q);
 	return ret;
 }
@@ -2544,6 +2596,10 @@ EXPORT_SYMBOL_GPL(direct_make_request);
  */
 blk_qc_t submit_bio(struct bio *bio)
 {
+	bool workingset_read = false;
+	unsigned long pflags;
+	blk_qc_t ret;
+
 	/*
 	 * If it's a regular read/write or a barrier with data attached,
 	 * go through the normal accounting stuff before submission.
@@ -2559,9 +2615,18 @@ blk_qc_t submit_bio(struct bio *bio)
 		if (op_is_write(bio_op(bio))) {
 			count_vm_events(PGPGOUT, count);
 		} else {
+			if (bio_flagged(bio, BIO_WORKINGSET))
+				workingset_read = true;
 			task_io_account_read(bio->bi_iter.bi_size);
 			count_vm_events(PGPGIN, count);
 		}
+
+		// #ifdef VENDOR_EDIT
+		// xiwu1.peng@kernel 2021/09/03 add for io acct
+		#ifdef CONFIG_TCL_IOACCT
+		tcl_ioacct_start(current);
+		#endif
+		// #endif /* VENDOR_EDIT */
 
 		if (unlikely(block_dump)) {
 			char b[BDEVNAME_SIZE];
@@ -2573,7 +2638,42 @@ blk_qc_t submit_bio(struct bio *bio)
 		}
 	}
 
-	return generic_make_request(bio);
+	/*
+	 * If we're reading data that is part of the userspace
+	 * workingset, count submission time as memory stall. When the
+	 * device is congested, or the submitting cgroup IO-throttled,
+	 * submission can be a significant part of overall IO time.
+	 */
+	if (workingset_read) {
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+		TRACE_BEGIN("tpms_submit_bio");
+#endif
+// #endif /* VENDOR_EDIT */
+		psi_memstall_enter(&pflags);
+	}
+
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	set_fgio_flag(bio, current);
+#endif
+// #endif /* VENDOR_EDIT */
+
+	ret = generic_make_request(bio);
+
+	if (workingset_read) {
+		psi_memstall_leave(&pflags);
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+		TRACE_END("tpms_submit_bio");
+#endif
+// #endif /* VENDOR_EDIT */
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL(submit_bio);
 
@@ -2733,6 +2833,13 @@ void blk_account_io_completion(struct request *req, unsigned int bytes)
 		part_stat_add(cpu, part, sectors[sgrp], bytes >> 9);
 		part_stat_unlock();
 	}
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+#ifdef CONFIG_RESOURCEMONITOR
+		eMMC_write_account(req, bytes);
+#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 }
 
 void blk_account_io_done(struct request *req, u64 now)
@@ -3090,6 +3197,24 @@ bool blk_update_request(struct request *req, blk_status_t error,
 
 	trace_block_rq_complete(req, blk_status_to_errno(error), nr_bytes);
 
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), begin
+	#if defined(CONFIG_TCL_HEALTHINFO) && defined(CONFIG_BLK_CGROUP)
+	if (nr_bytes) {
+		unsigned long long now = sched_clock();
+		unsigned long long delta_blk = 0;
+		unsigned long long delta_flash = 0;
+
+		if (time_after64(now, req->io_start_time_ns))
+			delta_flash = (now - req->io_start_time_ns) >> 20;
+		if (time_after64(req->io_start_time_ns, req->start_time_ns))
+			delta_blk = (req->io_start_time_ns - req->start_time_ns) >> 20;
+
+		iolatency_monitor(req->cmd_flags & REQ_FG, delta_blk, delta_flash);
+	}
+	#endif
+//[TCL][performance][common]Added/Modified by yipeng.jiang@tcl.com
+//2022.05.18, for healthinfo and resourcemonitor, SOCAOSP13-2781, (1/2), end
 	if (!req->bio)
 		return false;
 
@@ -3107,8 +3232,6 @@ bool blk_update_request(struct request *req, blk_status_t error,
 		if (bio_bytes == bio->bi_iter.bi_size)
 			req->bio = bio->bi_next;
 
-		/* Completion has already been traced */
-		bio_clear_flag(bio, BIO_TRACE_COMPLETION);
 		req_bio_endio(req, bio, bio_bytes, error);
 
 		total_bytes += bio_bytes;
@@ -3959,8 +4082,14 @@ int __init blk_dev_init(void)
 			FIELD_SIZEOF(struct bio, bi_opf));
 
 	/* used for unplugging and affects IO latency/throughput - HIGHPRI */
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2023/02/06 add for ux isolate
 	kblockd_workqueue = alloc_workqueue("kblockd",
-					    WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+					    WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND, 0);
+// #else
+//	kblockd_workqueue = alloc_workqueue("kblockd",
+//					    WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+// #endif /* VENDOR_EDIT */
 	if (!kblockd_workqueue)
 		panic("Failed to create kblockd\n");
 
@@ -3973,6 +4102,12 @@ int __init blk_dev_init(void)
 #ifdef CONFIG_DEBUG_FS
 	blk_debugfs_root = debugfs_create_dir("block", NULL);
 #endif
+
+	if (bio_crypt_ctx_init() < 0)
+		panic("Failed to allocate mem for bio crypt ctxs\n");
+
+	if (blk_crypto_fallback_init() < 0)
+		panic("Failed to init blk-crypto-fallback\n");
 
 	return 0;
 }

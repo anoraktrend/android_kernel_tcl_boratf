@@ -28,7 +28,12 @@
 #include <linux/interrupt.h>
 #include <linux/debug_locks.h>
 #include <linux/osq_lock.h>
-
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+#include <tcl/tcl_uxthread.h>
+#endif
+// #endif /* VENDOR_EDIT */
 #ifdef CONFIG_DEBUG_MUTEXES
 # include "mutex-debug.h"
 #else
@@ -44,6 +49,12 @@ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
 	osq_lock_init(&lock->osq);
 #endif
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	lock->ux_task = NULL;
+#endif
+// #endif /* VENDOR_EDIT */
 
 	debug_mutex_init(lock, name, key);
 }
@@ -188,6 +199,21 @@ __mutex_add_waiter(struct mutex *lock, struct mutex_waiter *waiter,
 		__mutex_set_flag(lock, MUTEX_FLAG_WAITERS);
 }
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+static void __sched
+__uxmutex_add_waiter(struct mutex *lock, struct mutex_waiter *waiter,
+		  struct list_head *list)
+{
+   debug_mutex_add_waiter(lock, waiter, current);
+
+   mutex_list_add(current, waiter, list, lock);
+   if (__mutex_waiter_is_first(lock, waiter))
+	   __mutex_set_flag(lock, MUTEX_FLAG_WAITERS);
+}
+#endif
+// #endif /* VENDOR_EDIT */
 /*
  * Give up ownership to a specific task, when @task = NULL, this is equivalent
  * to a regular unlock. Sets PICKUP on a handoff, clears HANDOF, preserves
@@ -953,9 +979,15 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 	lock_contended(&lock->dep_map, ip);
 
 	if (!use_ww_ctx) {
-		/* add waiting tasks to the end of the waitqueue (FIFO): */
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+		__uxmutex_add_waiter(lock, &waiter, &lock->wait_list);
+#else
+	/* add waiting tasks to the end of the waitqueue (FIFO): */
 		__mutex_add_waiter(lock, &waiter, &lock->wait_list);
-
+#endif
+// #endif /* VENDOR_EDIT */
 
 #ifdef CONFIG_DEBUG_MUTEXES
 		waiter.ww_ctx = MUTEX_POISON_WW_CTX;
@@ -1000,6 +1032,12 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 			if (ret)
 				goto err;
 		}
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+		mutex_dynamic_ux_enqueue(lock, current);
+#endif
+// #endif /* VENDOR_EDIT */
 
 		spin_unlock(&lock->wait_lock);
 		schedule_preempt_disabled();
@@ -1030,6 +1068,12 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 acquired:
 	__set_current_state(TASK_RUNNING);
 
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	clear_reverse_flag(current);
+#endif
+// #endif /* VENDOR_EDIT */
 	if (ww_ctx) {
 		/*
 		 * Wound-Wait; we stole the lock (!first_waiter), check the
@@ -1232,6 +1276,14 @@ static noinline void __sched __mutex_unlock_slowpath(struct mutex *lock, unsigne
 
 	spin_lock(&lock->wait_lock);
 	debug_mutex_unlock(lock);
+
+// #ifdef VENDOR_EDIT
+// jiajiun.xu@arch 2020/11/05 add for ux thread
+#ifdef CONFIG_TCL_UXEXPRESS
+	mutex_dynamic_ux_denqueue(lock, current);
+#endif
+// #endif /* VENDOR_EDIT */
+
 	if (!list_empty(&lock->wait_list)) {
 		/* get the first entry from the wait-list: */
 		struct mutex_waiter *waiter =

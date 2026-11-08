@@ -833,15 +833,12 @@ static struct kobj_type elv_ktype = {
 	.release	= elevator_release,
 };
 
-/*
- * elv_register_queue is called from either blk_register_queue or
- * elevator_switch, elevator switch is prevented from being happen
- * in the two paths, so it is safe to not hold q->sysfs_lock.
- */
-int elv_register_queue(struct request_queue *q, bool uevent)
+int elv_register_queue(struct request_queue *q)
 {
 	struct elevator_queue *e = q->elevator;
 	int error;
+
+	lockdep_assert_held(&q->sysfs_lock);
 
 	error = kobject_add(&e->kobj, &q->kobj, "%s", "iosched");
 	if (!error) {
@@ -853,29 +850,25 @@ int elv_register_queue(struct request_queue *q, bool uevent)
 				attr++;
 			}
 		}
-		if (uevent)
-			kobject_uevent(&e->kobj, KOBJ_ADD);
-
+		kobject_uevent(&e->kobj, KOBJ_ADD);
 		e->registered = 1;
 		if (!e->uses_mq && e->type->ops.sq.elevator_registered_fn)
 			e->type->ops.sq.elevator_registered_fn(q);
+		else if (e->uses_mq && e->type->ops.mq.elevator_registered_fn)
+			e->type->ops.mq.elevator_registered_fn(q);
 	}
 	return error;
 }
 
-/*
- * elv_unregister_queue is called from either blk_unregister_queue or
- * elevator_switch, elevator switch is prevented from being happen
- * in the two paths, so it is safe to not hold q->sysfs_lock.
- */
 void elv_unregister_queue(struct request_queue *q)
 {
+	lockdep_assert_held(&q->sysfs_lock);
+
 	if (q) {
 		struct elevator_queue *e = q->elevator;
 
 		kobject_uevent(&e->kobj, KOBJ_REMOVE);
 		kobject_del(&e->kobj);
-
 		e->registered = 0;
 		/* Re-enable throttling in case elevator disabled it */
 		wbt_enable_default(q);
@@ -951,7 +944,6 @@ int elevator_switch_mq(struct request_queue *q,
 	if (q->elevator) {
 		if (q->elevator->registered)
 			elv_unregister_queue(q);
-
 		ioc_clear_queue(q);
 		elevator_exit(q, q->elevator);
 	}
@@ -961,7 +953,7 @@ int elevator_switch_mq(struct request_queue *q,
 		goto out;
 
 	if (new_e) {
-		ret = elv_register_queue(q, true);
+		ret = elv_register_queue(q);
 		if (ret) {
 			elevator_exit(q, q->elevator);
 			goto out;
@@ -994,10 +986,27 @@ int elevator_init_mq(struct request_queue *q)
 
 	if (unlikely(q->elevator))
 		goto out;
-
-	e = elevator_get(q, "mq-deadline", false);
-	if (!e)
+// #ifdef VENDOR_EDIT
+// cheng.chang@arch 2022/01/20 add for fgio
+#ifdef CONFIG_TCL_FGIO
+	e = elevator_get(q, "tcl-deadline", false);
+        if (!e)
 		goto out;
+#else
+
+        //[TCT-ROM][performance]Begin added by yingbao,wang for 10589971 perf cgroup on 20210111
+	if (IS_ENABLED(CONFIG_IOSCHED_BFQ)) {
+		e = elevator_get(q, "bfq", false);
+		if (!e)
+			goto out;
+	} else {
+		e = elevator_get(q, "mq-deadline", false);
+		if (!e)
+			goto out;
+	}
+	//[TCT-ROM][performance]End added by yingbao,wang for 10589971 perf cgroup on 20210111
+#endif
+// #endif /* VENDOR_EDIT */
 
 	err = blk_mq_init_sched(q, e);
 	if (err)
@@ -1057,7 +1066,7 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 	if (err)
 		goto fail_init;
 
-	err = elv_register_queue(q, true);
+	err = elv_register_queue(q);
 	if (err)
 		goto fail_register;
 
@@ -1077,7 +1086,7 @@ fail_init:
 	/* switch failed, restore and re-register old elevator */
 	if (old) {
 		q->elevator = old;
-		elv_register_queue(q, true);
+		elv_register_queue(q);
 		blk_queue_bypass_end(q);
 	}
 

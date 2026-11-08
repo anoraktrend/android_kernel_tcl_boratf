@@ -991,6 +991,14 @@ static void tcp_update_skb_after_send(struct tcp_sock *tp, struct sk_buff *skb)
 	list_move_tail(&skb->tcp_tsorted_anchor, &tp->tsorted_sent_queue);
 }
 
+//[SYSD SYS] Begin modified by zhoujinggao for OLQ-16 on 2022-07-12
+#ifdef CONFIG_HELAEYE_BSP_TMO24H_TCP_RETRAN_ON
+int md_log_src_port;
+int md_log_dst_port;
+int md_5228_count=0;
+int gms_5228_count=0;
+#endif
+
 /* This routine actually transmits TCP packets queued in by
  * tcp_do_sendmsg().  This is used by both the initial
  * transmission and possible later retransmissions.
@@ -1085,6 +1093,22 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 
 	th->check		= 0;
 	th->urg_ptr		= 0;
+
+
+
+
+#ifdef CONFIG_HELAEYE_BSP_TMO24H_TCP_RETRAN_ON
+	md_log_src_port = ntohs(inet->inet_sport);
+	md_log_dst_port = ntohs(inet->inet_dport);
+  
+	if ( md_log_dst_port == 5228 )
+		gms_5228_count++;
+
+//printk("hela_tcp_debug __tcp_transmit_skb md_log_src_port=%d,md_log_dst_port=%d gms_5228_count =%d \n",
+//md_log_src_port,md_log_dst_port,gms_5228_count);
+
+#endif
+
 
 	/* The urg_mode check is necessary during a below snd_una win probe */
 	if (unlikely(tcp_urg_mode(tp) && before(tcb->seq, tp->snd_up))) {
@@ -2215,10 +2239,8 @@ static bool tcp_small_queue_check(struct sock *sk, const struct sk_buff *skb,
 {
 	unsigned int limit;
 
-	limit = max(2 * skb->truesize, sk->sk_pacing_rate >> sk->sk_pacing_shift);
-	limit = min_t(u32, limit,
+	limit = max_t(u32, sk->sk_pacing_rate >> sk->sk_pacing_shift,
 		      sock_net(sk)->ipv4.sysctl_tcp_limit_output_bytes);
-	limit <<= factor;
 
 	if (refcount_read(&sk->sk_wmem_alloc) > limit) {
 		/* Always send skb if rtx queue is empty.
@@ -2967,6 +2989,15 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
 	if (tp->undo_retrans < 0)
 		tp->undo_retrans = 0;
 	tp->undo_retrans += tcp_skb_pcount(skb);
+
+#ifdef CONFIG_HELAEYE_BSP_TMO24H_TCP_RETRAN_ON
+	if( md_log_dst_port == 5228 ){
+	md_5228_count++;
+//	printk("hela_tcp_debug tcp_retransmit_skb sport %d -> dport %d md_5228_count=%d/%d !!! \n",
+//	md_log_src_port,md_log_dst_port,md_5228_count,gms_5228_count);
+	}
+#endif
+
 	return err;
 }
 

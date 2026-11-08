@@ -2639,8 +2639,6 @@ static int bpf_skb_proto_4_to_6(struct sk_buff *skb)
 			shinfo->gso_type |=  SKB_GSO_TCPV6;
 		}
 
-		/* Due to IPv6 header, MSS needs to be downgraded. */
-		skb_decrease_gso_size(shinfo, len_diff);
 		/* Header must be checked, and gso_segs recomputed. */
 		shinfo->gso_type |= SKB_GSO_DODGY;
 		shinfo->gso_segs = 0;
@@ -2680,8 +2678,6 @@ static int bpf_skb_proto_6_to_4(struct sk_buff *skb)
 			shinfo->gso_type |=  SKB_GSO_TCPV4;
 		}
 
-		/* Due to IPv4 header, MSS can be upgraded. */
-		skb_increase_gso_size(shinfo, len_diff);
 		/* Header must be checked, and gso_segs recomputed. */
 		shinfo->gso_type |= SKB_GSO_DODGY;
 		shinfo->gso_segs = 0;
@@ -3886,6 +3882,60 @@ static const struct bpf_func_proto bpf_get_socket_uid_proto = {
 	.arg1_type      = ARG_PTR_TO_CTX,
 };
 
+// #ifdef VENDOR_EDIT
+// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+BPF_CALL_1(bpf_get_socket_pid, struct sk_buff *, skb)
+{
+	struct socket *socket = NULL;
+	struct sock *sk = sk_to_full_sk(skb->sk);
+	int pid = 0;
+
+	if (!sk || !sk_fullsock(sk))
+		return 0;
+
+	socket = sk->sk_socket;
+	if (!socket)
+		return 0;
+
+	pid = socket->pid;
+
+	return pid;
+}
+
+static const struct bpf_func_proto bpf_get_socket_pid_proto = {
+	.func           = bpf_get_socket_pid,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_PTR_TO_CTX,
+};
+
+BPF_CALL_3(bpf_get_socket_process, struct sk_buff *, skb,
+	void *, comm, u32, size)
+{
+	struct sock *sk = NULL;
+
+	if (!comm || size < TASK_COMM_LEN)
+		return -EINVAL;
+
+	sk = sk_to_full_sk(skb->sk);
+	if (!sk || !sk_fullsock(sk))
+		return -EINVAL;
+
+	strncpy(comm, sk->sk_process_name, TASK_COMM_LEN);
+
+	return 0;
+}
+
+static const struct bpf_func_proto bpf_get_socket_process_proto = {
+	.func           = bpf_get_socket_process,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_PTR_TO_CTX,
+	.arg2_type      = ARG_PTR_TO_UNINIT_MEM,
+	.arg3_type      = ARG_CONST_SIZE,
+};
+// #endif /* VENDOR_EDIT */
+
 BPF_CALL_5(bpf_setsockopt, struct bpf_sock_ops_kern *, bpf_sock,
 	   int, level, int, optname, char *, optval, int, optlen)
 {
@@ -4846,9 +4896,16 @@ bpf_base_func_proto(enum bpf_func_id func_id)
 		return &bpf_tail_call_proto;
 	case BPF_FUNC_ktime_get_ns:
 		return &bpf_ktime_get_ns_proto;
+	case BPF_FUNC_ktime_get_boot_ns:
+		return &bpf_ktime_get_boot_ns_proto;
 	case BPF_FUNC_trace_printk:
 		if (capable(CAP_SYS_ADMIN))
 			return bpf_get_trace_printk_proto();
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	case BPF_FUNC_get_socket_pid:
+		return &bpf_get_socket_pid_proto;
+	// #endif /* VENDOR_EDIT */
 		/* else: fall through */
 	default:
 		return NULL;
@@ -4909,6 +4966,13 @@ sk_filter_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_get_socket_cookie_proto;
 	case BPF_FUNC_get_socket_uid:
 		return &bpf_get_socket_uid_proto;
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	case BPF_FUNC_get_socket_pid:
+		return &bpf_get_socket_pid_proto;
+	case BPF_FUNC_get_socket_process:
+		return &bpf_get_socket_process_proto;
+	// #endif /* VENDOR_EDIT */
 	default:
 		return bpf_base_func_proto(func_id);
 	}
@@ -4961,6 +5025,8 @@ tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_skb_adjust_room_proto;
 	case BPF_FUNC_skb_change_tail:
 		return &bpf_skb_change_tail_proto;
+	case BPF_FUNC_skb_change_head:
+		return &bpf_skb_change_head_proto;
 	case BPF_FUNC_skb_get_tunnel_key:
 		return &bpf_skb_get_tunnel_key_proto;
 	case BPF_FUNC_skb_set_tunnel_key:
@@ -5001,6 +5067,11 @@ tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 	case BPF_FUNC_skb_ancestor_cgroup_id:
 		return &bpf_skb_ancestor_cgroup_id_proto;
 #endif
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	case BPF_FUNC_get_socket_pid:
+		return &bpf_get_socket_pid_proto;
+	// #endif /* VENDOR_EDIT */
 	default:
 		return bpf_base_func_proto(func_id);
 	}
@@ -5101,6 +5172,11 @@ sk_skb_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_sk_redirect_hash_proto;
 	case BPF_FUNC_get_local_storage:
 		return &bpf_get_local_storage_proto;
+	// #ifdef VENDOR_EDIT
+	// bin4.zhong@tcl.com, 2022/8/1, add for Process Traffic Statistic
+	case BPF_FUNC_get_socket_pid:
+		return &bpf_get_socket_pid_proto;
+	// #endif /* VENDOR_EDIT */
 	default:
 		return bpf_base_func_proto(func_id);
 	}

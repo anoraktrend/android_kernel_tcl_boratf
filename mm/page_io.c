@@ -22,9 +22,16 @@
 #include <linux/writeback.h>
 #include <linux/frontswap.h>
 #include <linux/blkdev.h>
+#include <linux/psi.h>
 #include <linux/uio.h>
 #include <linux/sched/task.h>
 #include <asm/pgtable.h>
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+#include <trace/events/zswapd_tcl.h>
+#endif
+// #endif /* VENDOR_EDIT */
 
 static struct bio *get_swap_bio(gfp_t gfp_flags,
 				struct page *page, bio_end_io_t end_io)
@@ -351,10 +358,25 @@ int swap_readpage(struct page *page, bool synchronous)
 	struct swap_info_struct *sis = page_swap_info(page);
 	blk_qc_t qc;
 	struct gendisk *disk;
+	unsigned long pflags;
 
 	VM_BUG_ON_PAGE(!PageSwapCache(page) && !synchronous, page);
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	VM_BUG_ON_PAGE(PageUptodate(page), page);
+
+	/*
+	 * Count submission time as memory stall. When the device is congested,
+	 * or the submitting cgroup IO-throttled, submission can be a
+	 * significant part of overall IO time.
+	 */
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+	TRACE_BEGIN("tpms_swap_readpage");
+#endif
+// #endif /* VENDOR_EDIT */
+	psi_memstall_enter(&pflags);
+
 	if (frontswap_load(page) == 0) {
 		SetPageUptodate(page);
 		unlock_page(page);
@@ -368,7 +390,7 @@ int swap_readpage(struct page *page, bool synchronous)
 		ret = mapping->a_ops->readpage(swap_file, page);
 		if (!ret)
 			count_vm_event(PSWPIN);
-		return ret;
+		goto out;
 	}
 
 	ret = bdev_read_page(sis->bdev, map_swap_page(page, &sis->bdev), page);
@@ -379,7 +401,7 @@ int swap_readpage(struct page *page, bool synchronous)
 		}
 
 		count_vm_event(PSWPIN);
-		return 0;
+		goto out;
 	}
 
 	ret = 0;
@@ -412,6 +434,13 @@ int swap_readpage(struct page *page, bool synchronous)
 	bio_put(bio);
 
 out:
+	psi_memstall_leave(&pflags);
+// #ifdef VENDOR_EDIT
+// Yuwei.Zhang@TEK_ARCH_KERNEL for PERAPPWK-324 on 2023/03/16, add for psi_mem_monitor
+#ifdef CONFIG_TCL
+	TRACE_END("tpms_swap_readpage");
+#endif
+// #endif /* VENDOR_EDIT */
 	return ret;
 }
 

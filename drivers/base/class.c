@@ -578,3 +578,38 @@ EXPORT_SYMBOL_GPL(class_destroy);
 
 EXPORT_SYMBOL_GPL(class_interface_register);
 EXPORT_SYMBOL_GPL(class_interface_unregister);
+#ifndef CONFIG_TCT_DEVICEINFO
+struct class *deviceinfo_class = NULL;
+//Added for device info 
+//static DEFINE_SPINLOCK(devicelock);
+//Added for device info
+static struct device *deviceinfo_dev = NULL;
+
+struct device* get_deviceinfo_dev(void)
+{
+	//spin_lock(&devicelock);
+	printk("the funciton get_deviceinfo_dev :spin_lock(&devicelock)!");
+	if(!deviceinfo_dev){
+		if(!deviceinfo_class){
+			deviceinfo_class = class_create(THIS_MODULE, "deviceinfo");
+			if (IS_ERR(deviceinfo_class))
+			{
+				pr_err("Failed to create class(deviceinfo)!\n");
+				printk("the funciton get_deviceinfo_dev :spin_unlock(&devicelock)!");
+				return NULL;
+			}
+		}
+		deviceinfo_dev = device_create(deviceinfo_class,NULL, 0, NULL, "device_info");
+		if (IS_ERR(deviceinfo_dev))
+		{
+			pr_err("Failed to create device(device_info)!\n");
+		}
+	}
+	//spin_unlock(&devicelock);
+	printk("the funciton get_deviceinfo_dev :spin_unlock(&devicelock)!");
+	return deviceinfo_dev;
+
+}
+EXPORT_SYMBOL_GPL(get_deviceinfo_dev);
+#endif
+

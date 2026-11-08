@@ -14,6 +14,7 @@
 #include <linux/sched/signal.h>
 #include <linux/uio.h>
 #include <linux/miscdevice.h>
+#include <linux/namei.h>
 #include <linux/pagemap.h>
 #include <linux/file.h>
 #include <linux/slab.h>
@@ -331,7 +332,10 @@ static void queue_request(struct fuse_iqueue *fiq, struct fuse_req *req)
 	req->in.h.len = sizeof(struct fuse_in_header) +
 		len_args(req->in.numargs, (struct fuse_arg *) req->in.args);
 	list_add_tail(&req->list, &fiq->pending);
-	wake_up(&fiq->waitq);
+	if (test_bit(FR_BACKGROUND, &req->flags))
+		wake_up(&fiq->waitq);
+	else
+		wake_up_sync(&fiq->waitq);
 	kill_fasync(&fiq->fasync, SIGIO, POLL_IN);
 }
 
@@ -417,8 +421,10 @@ static void request_end(struct fuse_conn *fc, struct fuse_req *req)
 		fc->active_background--;
 		flush_bg_queue(fc);
 		spin_unlock(&fc->lock);
+	}else {
+		/* Wake up waiter sleeping in request_wait_answer() */
+		wake_up_sync(&req->waitq);
 	}
-	wake_up(&req->waitq);
 	if (req->end)
 		req->end(fc, req);
 put_request:
@@ -573,6 +579,7 @@ ssize_t fuse_simple_request(struct fuse_conn *fc, struct fuse_args *args)
 	req->out.numargs = args->out.numargs;
 	memcpy(req->out.args, args->out.args,
 	       args->out.numargs * sizeof(struct fuse_arg));
+	req->out.canonical_path = args->out.canonical_path;
 	fuse_request_send(fc, req);
 	ret = req->out.h.error;
 	if (!ret && args->out.argvar) {
@@ -775,7 +782,7 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 			if (cs->nr_segs == cs->pipe->buffers)
 				return -EIO;
 
-			page = alloc_page(GFP_HIGHUSER);
+			page = alloc_page(GFP_HIGHUSER & ~__GFP_FS);
 			if (!page)
 				return -ENOMEM;
 
@@ -1932,6 +1939,13 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 	err = copy_out_args(cs, &req->out, nbytes);
 	fuse_copy_finish(cs);
 
+	if (!err && req->in.h.opcode == FUSE_CANONICAL_PATH) {
+		char *path = (char *)req->out.args[0].value;
+
+		path[req->out.args[0].size - 1] = 0;
+		req->out.h.error = kern_path(path, 0, req->out.canonical_path);
+	}
+
 	spin_lock(&fpq->lock);
 	clear_bit(FR_LOCKED, &req->flags);
 	if (!fpq->connected)
@@ -2247,37 +2261,56 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	int err = -ENOTTY;
+	int res;
+	int oldfd;
+	struct fuse_dev *fud = NULL;
+	struct fuse_passthrough_out pto;
 
-	if (cmd == FUSE_DEV_IOC_CLONE) {
-		int oldfd;
+	if (_IOC_TYPE(cmd) != FUSE_DEV_IOC_MAGIC)
+		return -EINVAL;
 
-		err = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *) arg)) {
+	switch (_IOC_NR(cmd)) {
+	case _IOC_NR(FUSE_DEV_IOC_CLONE):
+		res = -EFAULT;
+		if (!get_user(oldfd, (__u32 __user *)arg)) {
 			struct file *old = fget(oldfd);
 
-			err = -EINVAL;
+			res = -EINVAL;
 			if (old) {
-				struct fuse_dev *fud = NULL;
-
 				/*
 				 * Check against file->f_op because CUSE
 				 * uses the same ioctl handler.
 				 */
 				if (old->f_op == file->f_op &&
-				    old->f_cred->user_ns == file->f_cred->user_ns)
+				    old->f_cred->user_ns ==
+					    file->f_cred->user_ns)
 					fud = fuse_get_dev(old);
 
 				if (fud) {
 					mutex_lock(&fuse_mutex);
-					err = fuse_device_clone(fud->fc, file);
+					res = fuse_device_clone(fud->fc, file);
 					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
 			}
 		}
+		break;
+	case _IOC_NR(FUSE_DEV_IOC_PASSTHROUGH_OPEN):
+		res = -EFAULT;
+		if (!copy_from_user(&pto,
+				    (struct fuse_passthrough_out __user *)arg,
+				    sizeof(pto))) {
+			res = -EINVAL;
+			fud = fuse_get_dev(file);
+			if (fud)
+				res = fuse_passthrough_open(fud, &pto);
+		}
+		break;
+	default:
+		res = -ENOTTY;
+		break;
 	}
-	return err;
+	return res;
 }
 
 const struct file_operations fuse_dev_operations = {
