@@ -1327,6 +1327,8 @@ static void dpcm_be_reparent(struct snd_soc_pcm_runtime *fe,
 		return;
 
 	be_substream = snd_soc_dpcm_get_substream(be, stream);
+	if (!be_substream)
+		return;
 
 	list_for_each_entry(dpcm, &be->dpcm[stream].fe_clients, list_fe) {
 		if (dpcm->fe == fe)
@@ -3385,6 +3387,7 @@ int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
 			break;
 		}
 	}
+	spin_unlock_irqrestore(&fe->card->dpcm_lock, flags);
 
 	spin_unlock_irqrestore(&fe->card->dpcm_lock, flags);
 	/* it's safe to free/stop this BE DAI */
@@ -3510,7 +3513,6 @@ static ssize_t dpcm_show_state(struct snd_soc_pcm_runtime *fe,
 				params_channels(params),
 				params_rate(params));
 	}
-
 	spin_unlock_irqrestore(&fe->card->dpcm_lock, flags);
 out:
 	return offset;
