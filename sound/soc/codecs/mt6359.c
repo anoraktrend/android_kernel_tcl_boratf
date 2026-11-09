@@ -3154,12 +3154,12 @@ static int mt6359_rc_reset(struct mt6359_priv *priv, int ch)
 	default:
 		break;
 	}
-	dev_dbg(priv->dev, "%s(), reg: 0x%x(reg_shift), reg_reset: 0x%x\n",
+	dev_dbg(priv->dev, "%s(), reg: 0x%x, reg_shift: %d, reg_reset: 0x%x\n",
 		__func__, reg, reg_shift, reg_reset);
 	usleep_range(500, 520);
 	regmap_read(priv->regmap, reg, &reg_value);
 	rc = (reg_value >> reg_shift) & 0x1f;
-	dev_dbg(priv->dev, "%s(), reg(rc) = 0x%x(0x%x)\n",
+	dev_dbg(priv->dev, "%s(), reg: 0x%x, reg_value: 0x%x, rc: 0x%x\n",
 		__func__, reg, reg_value, rc);
 	if ((rc == 0) || (rc == 0x1f)) {
 		/* Disable audio x ADC */

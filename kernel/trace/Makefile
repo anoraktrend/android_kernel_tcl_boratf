@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 
+# Vendor trace headers live in this directory and use TRACE_INCLUDE_PATH .
+ccflags-y += -I$(srctree)/kernel/trace
+
 # Do not instrument the tracer itself:
 
 ifdef CONFIG_FUNCTION_TRACER

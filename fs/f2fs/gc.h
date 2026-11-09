@@ -163,17 +163,17 @@ TASK_PFA_TEST(GC_THREAD, gc_thread)
 TASK_PFA_SET(GC_THREAD, gc_thread)
 TASK_PFA_CLEAR(GC_THREAD, gc_thread)
 
-static inline void set_gc_thread()
+static inline void set_gc_thread(void)
 {
 	task_set_gc_thread(current);
 }
 
-static inline void clear_gc_thread()
+static inline void clear_gc_thread(void)
 {
 	task_clear_gc_thread(current);
 }
 
-static inline bool is_gc_thread()
+static inline bool is_gc_thread(void)
 {
 	return task_gc_thread(current);
 }
