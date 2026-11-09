@@ -990,6 +990,15 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=incompatible-pointer-types)
 # Require designated initializers for all marked structures
 KBUILD_CFLAGS   += $(call cc-option,-Werror=designated-init)
 
+# Vendor (MediaTek/TCL) code predates modern GCC diagnostics.  These
+# warning classes flagged by newer toolchains are not build breakers.
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=format)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=enum-int-mismatch)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=memset-elt-size)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=unused-variable)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=misleading-indentation)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=address)
+
 # change __FILE__ to the relative path from the srctree
 KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
 
