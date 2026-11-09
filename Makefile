@@ -998,6 +998,9 @@ KBUILD_CFLAGS   += $(call cc-option,-Wno-error=memset-elt-size)
 KBUILD_CFLAGS   += $(call cc-option,-Wno-error=unused-variable)
 KBUILD_CFLAGS   += $(call cc-option,-Wno-error=misleading-indentation)
 KBUILD_CFLAGS   += $(call cc-option,-Wno-error=address)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=format-extra-args)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=unused-result)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=switch-unreachable)
 
 # change __FILE__ to the relative path from the srctree
 KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)

@@ -554,7 +554,6 @@ static int verity_verify_io(struct dm_verity_io *io)
 				return -EIO;
 		}
 	}
-	}
 
 	return 0;
 }

@@ -1605,17 +1605,17 @@ static void ISP_DumpDmaDeepDbg(enum ISP_IRQ_TYPE_ENUM module)
 	case ISP_IRQ_TYPE_INT_CAM_A_ST:
 		regModule = ISP_CAM_A_IDX;
 		innerRegModule = ISP_CAM_A_INNER_IDX;
-		strncpy(cam, "CAM_A", sizeof("CAM_A"));
+		strlcpy(cam, "CAM_A", sizeof(cam));
 		break;
 	case ISP_IRQ_TYPE_INT_CAM_B_ST:
 		regModule = ISP_CAM_B_IDX;
 		innerRegModule = ISP_CAM_B_INNER_IDX;
-		strncpy(cam, "CAM_B", sizeof("CAM_B"));
+		strlcpy(cam, "CAM_B", sizeof(cam));
 		break;
 	case ISP_IRQ_TYPE_INT_CAM_C_ST:
 		regModule = ISP_CAM_C_IDX;
 		innerRegModule = ISP_CAM_C_INNER_IDX;
-		strncpy(cam, "CAM_C", sizeof("CAM_C"));
+		strlcpy(cam, "CAM_C", sizeof(cam));
 		break;
 	default:
 		LOG_NOTICE("unsupported module:0x%x\n", module);
