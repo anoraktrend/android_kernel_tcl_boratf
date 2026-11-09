@@ -3794,9 +3794,9 @@ static int mtk_drm_probe(struct platform_device *pdev)
 			if (IS_ERR(private->infra_regs))
 				DDPPR_ERR("%s: infra_ao_base of_iomap failed\n", __func__);
 			else
-				DDPMSG("%s, infra_regs:0x%p, infra_regs_pa:0x%lx\n",
+				DDPMSG("%s, infra_regs:0x%p, infra_regs_pa:0x%llx\n",
 					__func__, (void *)private->infra_regs,
-					private->infra_regs_pa);
+					(unsigned long long)private->infra_regs_pa);
 		}
 #elif defined(CONFIG_MACH_MT6781)
 		infra_node = of_find_compatible_node(NULL, NULL, "mediatek,infracfg_ao");
@@ -3814,9 +3814,9 @@ static int mtk_drm_probe(struct platform_device *pdev)
 			if (IS_ERR(private->infra_regs))
 				DDPPR_ERR("%s: infra_ao_base of_iomap failed\n", __func__);
 			else
-				DDPMSG("%s, infra_regs:0x%p, infra_regs_pa:0x%lx\n",
+				DDPMSG("%s, infra_regs:0x%p, infra_regs_pa:0x%llx\n",
 					__func__, (void *)private->infra_regs,
-					private->infra_regs_pa);
+					(unsigned long long)private->infra_regs_pa);
 		}
 #endif
 		of_node_put(infra_node);
