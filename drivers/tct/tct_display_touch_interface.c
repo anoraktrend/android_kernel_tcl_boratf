@@ -23,7 +23,7 @@
 #include <linux/input/touchscreen.h>
 #include <linux/module.h>
 #include <linux/input/tct_touch.h>
-#include <tct_debug.h>
+#include "tct_debug.h"
 
 
 /*****************************************************************************

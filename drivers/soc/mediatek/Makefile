@@ -2,6 +2,7 @@ obj-$(CONFIG_MTK_PMQOS) += mtk-pm-qos.o
 obj-$(CONFIG_MTK_CMDQ) += mtk-cmdq-helper.o
 
 ccflags-$(CONFIG_MTK_CMDQ_MBOX_EXT) += -I$(srctree)/drivers/misc/mediatek/cmdq/mailbox
+ccflags-y += -I$(srctree)/drivers/soc/mediatek
 
 obj-$(CONFIG_MTK_INFRACFG) += mtk-infracfg.o mtk-scpsys-ext.o
 obj-$(CONFIG_MTK_DVFSRC) += mtk-dvfsrc.o

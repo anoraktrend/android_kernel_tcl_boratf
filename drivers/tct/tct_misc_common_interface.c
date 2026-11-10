@@ -19,7 +19,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <tct_debug.h>
+#include "tct_debug.h"
 
 //Begin add by bing-zhang for 11669573 on 2021/11/12
 #if defined(CONFIG_TCT_BOARD_ID_COMPATIBLE)

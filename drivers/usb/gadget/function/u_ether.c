@@ -1148,10 +1148,7 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 		net->addr_assign_type = NET_ADDR_RANDOM;
 		dev_warn(&g->dev,
 			"using random %s ethernet address\n", "self");
-	if (get_ether_addr(dev_addr, net->dev_addr))
-		dev_warn(&g->dev,
-			"using random %s ethernet address\n", "self");
-	else {
+	} else {
 		net->addr_assign_type = NET_ADDR_SET;
 	}
 

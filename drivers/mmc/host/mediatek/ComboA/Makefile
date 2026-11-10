@@ -26,6 +26,7 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/pmic/
 #workaround for include mmc/card/queue.h and mmc/core/core.h
 ccflags-y += -I$(srctree)/drivers
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA
 ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/$(MMC_FOLDER)
 
 ifeq ($(CONFIG_MTK_PLATFORM), "mt6761")

@@ -47,7 +47,7 @@ static int fixtemp_val = 250;
 /* End added by hailong.chen for task 9777034 on 2020-08-20 */
 
 //Begin Modified by qiuguangliang for 11043275 on 2021-04-23
-#include <mtk_charger.h>
+#include "mtk_charger.h"
 //End Modified by qiuguangliang for 11043275 on 2021-04-23
 
 /* Begin added by dapeng.qiao for task 11038299 on 2021-05-1 */

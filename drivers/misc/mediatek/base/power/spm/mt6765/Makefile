@@ -1,3 +1,5 @@
+# Include platform-local headers (mtk_spm_irq.h, mtk_spm_internal.h, pwr_ctrl.h, ...)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm/mt6765/
 # Include mtk_idle_internal.h for MTK_IDLE_OPT_XXX
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm/common/
 # Include mt-plat/upmu_common.h

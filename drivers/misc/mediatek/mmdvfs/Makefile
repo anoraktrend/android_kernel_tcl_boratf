@@ -19,6 +19,7 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/swpm_v1/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/freqhopping/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/freqhopping/$(MTK_PLATFORM)/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmdvfs
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/smi/
 ccflags-${CONFIG_MACH_MT6833} += -I$(srctree)/drivers/misc/mediatek/smi/mt6833/
 ccflags-${CONFIG_MACH_MT6877} += -I$(srctree)/drivers/misc/mediatek/smi/mt6877/

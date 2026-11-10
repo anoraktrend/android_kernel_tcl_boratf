@@ -37,6 +37,7 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 
 # for phy and vbus settings
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb20
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb20/$(usb20plat)
 
 ifeq ($(CONFIG_TCPC_CLASS),y)
