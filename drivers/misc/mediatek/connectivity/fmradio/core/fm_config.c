@@ -492,7 +492,6 @@ out:
 
 static signed int fm_cust_config_print(struct fm_cust_cfg *cfg)
 {
-#if 0
 	WCN_DBG(FM_NTC | MAIN, "0x%x configs:\n", g_fm_chipid);
 	WCN_DBG(FM_NTC | MAIN, "RX->rssi_l:\t%d\n", cfg->rx_cfg.long_ana_rssi_th);
 	WCN_DBG(FM_NTC | MAIN, "RX->rssi_s:\t%d\n", cfg->rx_cfg.short_ana_rssi_th);
@@ -515,7 +514,6 @@ static signed int fm_cust_config_print(struct fm_cust_cfg *cfg)
 		cfg->aud_cfg.i2s_info.mode,
 		cfg->aud_cfg.i2s_info.rate,
 		cfg->aud_cfg.i2s_pad);
-#endif
 	return 0;
 }
 

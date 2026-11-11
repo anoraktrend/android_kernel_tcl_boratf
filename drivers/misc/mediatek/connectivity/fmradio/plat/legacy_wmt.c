@@ -271,83 +271,6 @@ static unsigned int drv_get_get_adie(void)
 #endif
 }
 
-signed int __weak fm_low_ops_register(struct fm_callback *cb,
-				       struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak fm_low_ops_unregister(struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak fm_rds_ops_register(struct fm_basic_interface *bi,
-				      struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak fm_rds_ops_unregister(struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6631_fm_low_ops_register(
-	struct fm_callback *cb, struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6631_fm_low_ops_unregister(struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6631_fm_rds_ops_register(
-	struct fm_basic_interface *bi, struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6631_fm_rds_ops_unregister(struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-signed int __weak mt6635_fm_low_ops_register(
-	struct fm_callback *cb, struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6635_fm_low_ops_unregister(struct fm_basic_interface *bi)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6635_fm_rds_ops_register(
-	struct fm_basic_interface *bi, struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
-signed int __weak mt6635_fm_rds_ops_unregister(struct fm_rds_interface *ri)
-{
-	WCN_DBG(FM_NTC | CHIP, "default %s\n", __func__);
-	return -1;
-}
-
 void register_fw_ops_init(void)
 {
 	struct fm_ext_interface *ei = &fm_wcn_ops.ei;
@@ -370,15 +293,19 @@ void register_fw_ops_init(void)
 	WCN_DBG(FM_NTC | CHIP, "adie=0x%x\n", adie);
 
 	if (adie == 0x6631) {
+#if defined(MT6631_FM)
 		ei->low_ops_register = mt6631_fm_low_ops_register;
 		ei->low_ops_unregister = mt6631_fm_low_ops_unregister;
 		ei->rds_ops_register = mt6631_fm_rds_ops_register;
 		ei->rds_ops_unregister = mt6631_fm_rds_ops_unregister;
+#endif
 	} else if (adie == 0x6635) {
+#if defined(MT6635_FM)
 		ei->low_ops_register = mt6635_fm_low_ops_register;
 		ei->low_ops_unregister = mt6635_fm_low_ops_unregister;
 		ei->rds_ops_register = mt6635_fm_rds_ops_register;
 		ei->rds_ops_unregister = mt6635_fm_rds_ops_unregister;
+#endif
 	} else {
 #if defined(MT6631_FM)
 		ei->low_ops_register = mt6631_fm_low_ops_register;
@@ -403,7 +330,12 @@ void register_fw_ops_uninit(void)
 {
 }
 
-int fm_register_irq(struct platform_driver *drv)
+int fm_register_irq(struct platform_driver *drv, unsigned int irq_num)
+{
+	return 0;
+}
+
+int fm_register_plat(unsigned int family_id, unsigned int conn_id)
 {
 	return 0;
 }

@@ -153,7 +153,9 @@
 #define CONSYS_WD_SYS_RST_BIT		(0x1 << 9)
 
 /*CONSYS_MCU_CFG_ACR_REG*/
-#define CONSYS_MCU_CFG_ACR_MBIST_BIT	(0x1 << 0 | 0x1 << 1)
+#define CONSYS_MCU_CFG_ACR_MBIST_OFFSET	(0x10)
+#define CONSYS_MCU_CFG_ACR_MBIST_MASK	(0xfffffffc)
+#define CONSYS_MCU_CFG_ACR_MBIST_VAL	(0x3)
 
 /*control app2cnn_osc_en*/
 #define CONSYS_AP2CONN_OSC_EN_BIT	(0x1 << 10)
@@ -239,6 +241,20 @@ extern struct bt_wifi_v33_status gBtWifiV33;
 *                  F U N C T I O N   D E C L A R A T I O N S
 ********************************************************************************
 */
+extern INT32 dump_conn_debug_dump_mt6765(const char *trg_str);
+extern INT32 dump_conn_mcu_debug_flag_mt6765(const char *trg_str);
+extern INT32 dump_conn_mcu_apb0_bus_mt6765(const char *trg_str);
+extern INT32 dump_conn_mcu_apb1_bus_mt6765(const char *trg_str);
+extern INT32 dump_conn_bus_timeout_mt6765(const char *trg_str);
+extern INT32 dump_conn_mcu_pc_log_mt6765(const char *trg_str);
+extern INT32 dump_conn_cfg_on_debug_signal_mt6765(const char *trg_str);
+extern INT32 dump_conn_cfg_on_register_mt6765(const char *trg_str);
+extern INT32 dump_conn_cmdbt_debug_signal_mt6765(const char *trg_str);
+extern INT32 dump_conn_emi_detect_mt6765(const char *trg_str);
+extern INT32 dump_conn_slp_protect_debug_mt6765(const char *trg_str);
+extern INT32 dump_conn_spm_r13_mt6765(const char *trg_str);
+extern INT32 dump_conn_bus_timeout_debug_mt6765(const char *trg_str);
+extern INT32 dump_conn_ILM_corrupt_issue_debug_mt6765(const char *trg_str);
 
 /*******************************************************************************
 *                              F U N C T I O N S

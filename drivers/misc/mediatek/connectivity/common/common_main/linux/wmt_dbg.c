@@ -30,12 +30,7 @@
 #include "stp_core.h"
 #include "stp_dbg.h"
 #include "connsys_debug_utility.h"
-#include "wmt_step.h"
 #include "wmt_alarm.h"
-#include <linux/vmalloc.h>
-#ifdef CONFIG_MTK_ENG_BUILD
-#include "wmt_step_test.h"
-#endif
 
 #ifdef DFT_TAG
 #undef DFT_TAG
@@ -61,7 +56,7 @@ struct wmt_dbg_work {
 
 static struct proc_dir_entry *gWmtDbgEntry;
 COEX_BUF gCoexBuf;
-static UINT8 *gEmiBuf;
+static UINT8 gEmiBuf[WMT_EMI_DEBUG_BUF_SIZE];
 PUINT8 buf_emi;
 static OSAL_SLEEPABLE_LOCK g_dbg_emi_lock;
 
@@ -127,15 +122,11 @@ static INT32 wmt_dbg_emi_dump(INT32 par1, INT32 offset, INT32 size);
 static INT32 wmt_dbg_suspend_debug(INT32 par1, INT32 offset, INT32 size);
 static INT32 wmt_dbg_fw_log_ctrl(INT32 par1, INT32 onoff, INT32 level);
 static INT32 wmt_dbg_pre_pwr_on_ctrl(INT32 par1, INT32 enable, INT32 par3);
-#ifdef CONFIG_MTK_ENG_BUILD
-static INT32 wmt_dbg_step_test(INT32 par1, INT32 address, INT32 value);
-#endif
 
 static INT32 wmt_dbg_alarm_ctrl(INT32 par1, INT32 offset, INT32 size);
 
 static INT32 wmt_dbg_thermal_query(INT32 par1, INT32 count, INT32 interval);
 static INT32 wmt_dbg_thermal_ctrl(INT32 par1, INT32 par2, INT32 par3);
-static INT32 wmt_dbg_step_ctrl(INT32 par1, INT32 par2, INT32 par3);
 
 static INT32 wmt_dbg_gps_suspend(INT32 par1, INT32 par2, INT32 par3);
 static INT32 wmt_dbg_set_bt_link_status(INT32 par1, INT32 par2, INT32 par3);
@@ -190,7 +181,6 @@ static const WMT_DEV_DBG_FUNC wmt_dev_dbg_func[] = {
 	[0x28] = wmt_dbg_pre_pwr_on_ctrl,
 	[0x29] = wmt_dbg_thermal_query,
 	[0x2a] = wmt_dbg_thermal_ctrl,
-	[0x2b] = wmt_dbg_step_ctrl,
 #ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
 	[0x2c] = wmt_dbg_set_fw_log_mode,
 	[0x2d] = wmt_dbg_emi_dump,
@@ -200,9 +190,6 @@ static const WMT_DEV_DBG_FUNC wmt_dev_dbg_func[] = {
 	[0x30] = wmt_dbg_show_thread_debug_info,
 	[0x31] = wmt_dbg_gps_suspend,
 	[0x32] = wmt_dbg_alarm_ctrl,
-#ifdef CONFIG_MTK_ENG_BUILD
-	[0xa0] = wmt_dbg_step_test,
-#endif
 };
 
 static VOID wmt_dbg_fwinfor_print_buff(UINT32 len)
@@ -600,7 +587,6 @@ INT32 wmt_dbg_wmt_assert_ctrl(INT32 par1, INT32 par2, INT32 par3)
 
 INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 {
-	INT32 ret = 0;
 	UINT32 offset = 0;
 	UINT32 len = 0;
 	UINT32 *pAddr = NULL;
@@ -619,31 +605,24 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 	buf_emi = kmalloc(sizeof(UINT8) * BUF_LEN_MAX, GFP_KERNEL);
 	if (!buf_emi) {
 		WMT_ERR_FUNC("buf kmalloc memory fail\n");
-		ret = -ENOMEM;
-		goto unlock;
-	}
-	gEmiBuf = vzalloc(WMT_EMI_DEBUG_BUF_SIZE);
-	if (!gEmiBuf) {
-		WMT_ERR_FUNC("EMI buffer allocation failed\n");
-		ret = -ENOMEM;
-		goto free_line_buf;
+		return 0;
 	}
 	osal_memset(buf_emi, 0, BUF_LEN_MAX);
-	wmt_lib_get_fwinfor_from_emi(0, offset, gEmiBuf, 0x100);
+	osal_memset(&gEmiBuf[0], 0, WMT_EMI_DEBUG_BUF_SIZE);
+	wmt_lib_get_fwinfor_from_emi(0, offset, &gEmiBuf[0], 0x100);
 
 	if (offset == 1) {
 		do {
 			pAddr = (PUINT32) wmt_plat_get_emi_virt_add(0x24);
 			if (pAddr == NULL) {
 				WMT_ERR_FUNC("get virtual emi address 0x24 fail!\n");
-				ret = -EFAULT;
-				goto free_emi_buf;
+				return -1;
 			}
 			cur_idx_pagedtrace = *pAddr;
 
 			if (cur_idx_pagedtrace > prev_idx_pagedtrace) {
 				len = cur_idx_pagedtrace - prev_idx_pagedtrace;
-				wmt_lib_get_fwinfor_from_emi(1, prev_idx_pagedtrace, gEmiBuf, len);
+				wmt_lib_get_fwinfor_from_emi(1, prev_idx_pagedtrace, &gEmiBuf[0], len);
 				wmt_dbg_fwinfor_print_buff(len);
 				prev_idx_pagedtrace = cur_idx_pagedtrace;
 			}
@@ -656,12 +635,12 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 				}
 
 				len = 0x8000 - prev_idx_pagedtrace - 1;
-				wmt_lib_get_fwinfor_from_emi(1, prev_idx_pagedtrace, gEmiBuf, len);
+				wmt_lib_get_fwinfor_from_emi(1, prev_idx_pagedtrace, &gEmiBuf[0], len);
 				WMT_INFO_FUNC("\n\n -- CONNSYS paged trace ascii output (cont...) --\n\n");
 				wmt_dbg_fwinfor_print_buff(len);
 
 				len = cur_idx_pagedtrace;
-				wmt_lib_get_fwinfor_from_emi(1, 0x0, gEmiBuf, len);
+				wmt_lib_get_fwinfor_from_emi(1, 0x0, &gEmiBuf[0], len);
 				WMT_INFO_FUNC("\n\n -- CONNSYS paged trace ascii output (end) --\n\n");
 				wmt_dbg_fwinfor_print_buff(len);
 				prev_idx_pagedtrace = cur_idx_pagedtrace;
@@ -676,23 +655,17 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 		len = 1024 * 4;
 
 	WMT_WARN_FUNC("get fw infor from emi at offset(0x%x),len(0x%x)\n", offset, len);
-	osal_memset(gEmiBuf, 0, WMT_EMI_DEBUG_BUF_SIZE);
-	wmt_lib_get_fwinfor_from_emi(1, offset, gEmiBuf, len);
+	osal_memset(&gEmiBuf[0], 0, WMT_EMI_DEBUG_BUF_SIZE);
+	wmt_lib_get_fwinfor_from_emi(1, offset, &gEmiBuf[0], len);
 
 	WMT_INFO_FUNC("\n\n -- paged trace hex output --\n\n");
 	wmt_dbg_fwinfor_print_buff(len);
 	WMT_INFO_FUNC("\n\n -- paged trace ascii output --\n\n");
 	wmt_dbg_fwinfor_print_buff(len);
-free_emi_buf:
-	vfree(gEmiBuf);
-	gEmiBuf = NULL;
-free_line_buf:
 	kfree(buf_emi);
-	buf_emi = NULL;
-unlock:
 	osal_unlock_sleepable_lock(&g_dbg_emi_lock);
 
-	return ret;
+	return 0;
 }
 
 INT32 wmt_dbg_stp_trigger_assert(INT32 par1, INT32 par2, INT32 par3)
@@ -708,7 +681,7 @@ static INT32 wmt_dbg_ap_reg_read(INT32 par1, INT32 par2, INT32 par3)
 	PUINT8 ap_reg_base = NULL;
 
 	WMT_INFO_FUNC("AP register read, reg address:0x%x\n", par2);
-	ap_reg_base = ioremap_nocache(par2, 0x4);
+	ap_reg_base = ioremap(par2, 0x4);
 	if (ap_reg_base) {
 		value = readl(ap_reg_base);
 		WMT_INFO_FUNC("AP register read, reg address:0x%x, value:0x%x\n", par2, value);
@@ -726,7 +699,7 @@ static INT32 wmt_dbg_ap_reg_write(INT32 par1, INT32 par2, INT32 par3)
 
 	WMT_INFO_FUNC("AP register write, reg address:0x%x, value:0x%x\n", par2, par3);
 
-	ap_reg_base = ioremap_nocache(par2, 0x4);
+	ap_reg_base = ioremap(par2, 0x4);
 	if (ap_reg_base) {
 		writel(par3, ap_reg_base);
 		value = readl(ap_reg_base);
@@ -759,12 +732,10 @@ static INT32 wmt_dbg_emi_dump(INT32 par1, INT32 offset, INT32 size)
 /********************************************************/
 static INT32 wmt_dbg_suspend_debug(INT32 par1, INT32 par2, INT32 par3)
 {
-#if 0
 	if (par2 > 0)
 		connsys_log_alarm_enable(par2);
 	else
 		connsys_log_alarm_disable();
-#endif
 	return 0;
 }
 
@@ -807,8 +778,9 @@ static INT32 wmt_dbg_sdio_retry_ctrl(INT32 par1, INT32 par2, INT32 par3)
 {
 	WMT_INFO_FUNC("%s sdio retry!!\n", par2 == 0 ? "disable" : "enable");
 
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	mtk_stp_dbg_sdio_retry_flag_ctrl(par2 == 0 ? 0 : 1);
-
+#endif
 	return 0;
 }
 
@@ -950,15 +922,6 @@ INT32 wmt_dbg_pre_pwr_on_ctrl(INT32 par1, INT32 enable, INT32 par3)
 	return 0;
 }
 
-#ifdef CONFIG_MTK_ENG_BUILD
-INT32 wmt_dbg_step_test(INT32 par1, INT32 par2, INT32 par3)
-{
-	wmt_step_test_all();
-
-	return 0;
-}
-#endif
-
 INT32 wmt_dbg_thermal_query(INT32 par1, INT32 count, INT32 interval)
 {
 	LONG tm;
@@ -989,20 +952,6 @@ INT32 wmt_dbg_thermal_ctrl(INT32 par1, INT32 par2, INT32 par3)
 			return -1;
 		}
 		wmt_dev_set_temp_threshold(par3);
-	}
-
-	return 0;
-}
-
-static INT32 wmt_dbg_step_ctrl(INT32 par1, INT32 par2, INT32 par3)
-{
-	if (par2 == 0)
-		wmt_step_print_version();
-	else if (par2 == 1) {
-		WMT_INFO_FUNC("STEP show: Start to change config\n");
-		wmt_step_deinit();
-		wmt_step_init();
-		WMT_INFO_FUNC("STEP show: End to change config\n");
 	}
 
 	return 0;
@@ -1576,8 +1525,7 @@ ssize_t wmt_dbg_write(struct file *filp, const char __user *buffer, size_t count
 	 * 0x2f: set bt link status
 	 * 0x32: alarm dump control
 	 */
-	if (0 == dbgEnabled && 0x15 != x && 0x2e != x && 0x2f != x &&
-		0x7 != x && x != 0x32) {
+	if (0 == dbgEnabled && 0x15 != x && 0x2e != x && 0x2f != x && x != 0x32) {
 		WMT_INFO_FUNC("please enable WMT debug first\n\r");
 		return len;
 	}
@@ -1595,11 +1543,18 @@ ssize_t wmt_dbg_write(struct file *filp, const char __user *buffer, size_t count
 
 INT32 wmt_dev_dbg_setup(VOID)
 {
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(5, 6, 0))
 	static const struct file_operations wmt_dbg_fops = {
 		.owner = THIS_MODULE,
 		.read = wmt_dbg_read,
 		.write = wmt_dbg_write,
 	};
+#else
+	static const struct proc_ops wmt_dbg_fops = {
+		.proc_read = wmt_dbg_read,
+		.proc_write = wmt_dbg_write,
+	};
+#endif
 	INT32 i_ret = 0;
 
 	gWmtDbgEntry = proc_create(WMT_DBG_PROCNAME, 0664, NULL, &wmt_dbg_fops);

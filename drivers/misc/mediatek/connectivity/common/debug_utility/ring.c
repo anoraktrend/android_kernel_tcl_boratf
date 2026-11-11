@@ -51,10 +51,13 @@ void ring_dump_segment(const char *title, struct ring_segment *seg)
  */
 unsigned int ring_read_prepare(unsigned int sz, struct ring_segment *seg, struct ring *ring)
 {
-	unsigned int used = ring->write - ring->read;
+	unsigned int wt = ring->write;
+	unsigned int rd = ring->read;
 
 	memset(seg, 0, sizeof(struct ring_segment));
-	seg->remain = min(sz, used);
+	if (sz > wt - rd)
+		sz = wt - rd;
+	seg->remain = sz;
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
 	return seg->remain;
@@ -65,11 +68,13 @@ unsigned int ring_read_prepare(unsigned int sz, struct ring_segment *seg, struct
  */
 unsigned int ring_write_prepare(unsigned int sz, struct ring_segment *seg, struct ring *ring)
 {
-	unsigned int used = ring->write - ring->read;
-	unsigned int free = ring->max_size - used;
+	unsigned int wt = ring->write;
+	unsigned int rd = ring->read;
 
 	memset(seg, 0, sizeof(struct ring_segment));
-	seg->remain = min(sz, free);
+	if (sz > ring->max_size - (wt - rd))
+		sz = ring->max_size - (wt - rd);
+	seg->remain = sz;
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
 	return seg->remain;
@@ -78,12 +83,12 @@ unsigned int ring_write_prepare(unsigned int sz, struct ring_segment *seg, struc
 unsigned int ring_overwrite_prepare(unsigned int sz, struct ring_segment *seg,
 						      struct ring *ring)
 {
-	unsigned int used = ring->write - ring->read;
-	unsigned int free = ring->max_size - used;
+	unsigned int wt = ring->write;
+	unsigned int rd = ring->read;
 
 	memset(seg, 0, sizeof(struct ring_segment));
-	if (sz > free)
-		ring->read += sz - free;
+	if (sz > ring->max_size - (wt - rd))
+		ring->read += sz - (ring->max_size - (wt - rd));
 	seg->remain = sz;
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
@@ -94,11 +99,13 @@ void __ring_segment_prepare(unsigned int from, unsigned int sz, struct ring_segm
 					      struct ring *ring)
 {
 	unsigned int ring_pos = from & (ring->max_size - 1);
-	unsigned int tail = ring->max_size - ring_pos;
 
 	seg->ring_pt = ring->base + ring_pos;
 	seg->data_pos = (seg->sz ? seg->data_pos + seg->sz : 0);
-	seg->sz = min(sz, tail);
+	if (ring_pos + sz <= ring->max_size)
+		seg->sz = sz;
+	else
+		seg->sz = ring->max_size - ring_pos;
 	seg->remain -= seg->sz;
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
@@ -129,3 +136,4 @@ void _ring_write_commit(struct ring_segment *seg, struct ring *ring)
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
 }
+

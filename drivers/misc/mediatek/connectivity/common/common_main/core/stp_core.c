@@ -19,7 +19,6 @@
 #include "stp_sdio.h"
 #include "stp_btif.h"
 #include "wmt_lib.h"
-#include "wmt_step.h"
 #include "wmt_detect.h"
 
 #define PFX                         "[STP] "
@@ -57,42 +56,6 @@ static FUNCTION_STATUS sys_check_function_status;
 /* kernel lib */
 /* INT32                g_block_tx = 0; */
 static mtkstp_context_struct stp_core_ctx = { 0 };
-
-#ifdef CONFIG_MTK_ENABLE_GMO
-#ifdef CONFIG_MTK_FMRADIO
-#define STP_UNUSED_FM_QUEUE 0
-#else
-#define STP_UNUSED_FM_QUEUE 1
-#endif
-#ifdef CONFIG_MTK_COMBO_ANT
-#define STP_UNUSED_ANT_QUEUE 0
-#else
-#define STP_UNUSED_ANT_QUEUE 1
-#endif
-#define STP_RX_QUEUE_COUNT (MTKSTP_MAX_TASK_NUM - 1 - \
-	STP_UNUSED_FM_QUEUE - STP_UNUSED_ANT_QUEUE)
-static UINT8 stp_rx_queues[STP_RX_QUEUE_COUNT][MTKSTP_BUFFER_SIZE];
-
-static void stp_init_rx_queue_buffers(void)
-{
-	int queue = 0;
-	int type;
-
-	for (type = 0; type < MTKSTP_MAX_TASK_NUM; type++) {
-		if (type == STP_TASK_INDX)
-			continue;
-#ifndef CONFIG_MTK_FMRADIO
-		if (type == FM_TASK_INDX)
-			continue;
-#endif
-#ifndef CONFIG_MTK_COMBO_ANT
-		if (type == ANT_TASK_INDX)
-			continue;
-#endif
-		stp_core_ctx.ring[type].buffer = stp_rx_queues[queue++];
-	}
-}
-#endif
 
 #define STP_PSM_CORE(x)           ((x).psm)
 #define STP_SET_PSM_CORE(x, v)     ((x).psm = (v))
@@ -185,52 +148,6 @@ static VOID stp_sdio_trace32_dump(VOID);
 static LONG stp_parser_dmp_num(PUINT8 str);
 static INT32 wmt_parser_data(PUINT8 buffer, UINT32 length, UINT8 type);
 static MTK_WCN_BOOL mtk_wcn_stp_is_info_task(VOID);
-
-INT32 __weak mtk_wcn_consys_stp_btif_logger_ctrl(enum _ENUM_BTIF_DBG_ID_ flag)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_logger_ctrl is not define!!\n");
-	return 0;
-}
-INT32 __weak mtk_wcn_consys_stp_btif_open(VOID)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_open is not define!!\n");
-
-	return 0;
-}
-
-INT32 __weak mtk_wcn_consys_stp_btif_close(VOID)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_close is not define!!\n");
-
-	return 0;
-}
-
-INT32 __weak mtk_wcn_consys_stp_btif_rx_cb_register(MTK_WCN_BTIF_RX_CB rx_cb)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_rx_cb_register is not define!!\n");
-	return 0;
-}
-
-INT32 __weak mtk_wcn_consys_stp_btif_tx(const PUINT8 pBuf, const UINT32 len, PUINT32 written_len)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_tx is not define!!\n");
-
-	return 0;
-}
-
-INT32 __weak mtk_wcn_consys_stp_btif_wakeup(VOID)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_wakeup is not define!!\n");
-
-	return 0;
-}
-
-INT32 __weak mtk_wcn_consys_stp_btif_lpbk_ctrl(enum _ENUM_BTIF_LPBK_MODE_ mode)
-{
-	STP_INFO_FUNC("in combo flow, mtk_wcn_consys_stp_btif_lpbk_ctrl is not define!!\n");
-
-	return 0;
-}
 
 static INT32 stp_ctx_lock_init(mtkstp_context_struct *pctx)
 {
@@ -797,7 +714,8 @@ VOID stp_do_tx_timeout(VOID)
 					reason = 45;
 				}
 
-				WMT_STEP_COMMAND_TIMEOUT_DO_ACTIONS_FUNC("STP TX no ack timeout");
+				wmt_lib_cmd_tx_timeout_dump();
+
 				osal_timer_stop(&stp_core_ctx.tx_timer);
 				stp_ctx_unlock(&stp_core_ctx);
 
@@ -817,7 +735,7 @@ VOID stp_do_tx_timeout(VOID)
 	}
 
 	stp_ctx_unlock(&stp_core_ctx);
-	/*polling cpupcr when no ack occurs at first retry */
+	/* polling cpupcr when no ack occurs at first retry */
 	stp_dbg_poll_cpupcr(STP_POLL_CPUPCR_NUM, STP_POLL_CPUPCR_DELAY, 1);
 	STP_WARN_FUNC
 	    ("==============================================================================#\n");
@@ -997,10 +915,6 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 {
 	UINT32 roomLeft, last_len;
 
-#ifdef CONFIG_MTK_ENABLE_GMO
-	if (unlikely(!stp_core_ctx.ring[type].buffer))
-		return -1;
-#endif
 	osal_lock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
 
 	if (stp_core_ctx.ring[type].read_p <= stp_core_ctx.ring[type].write_p)
@@ -1539,9 +1453,6 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	INT32 ret = 0;
 	INT32 i = 0;
 
-#ifdef CONFIG_MTK_ENABLE_GMO
-	stp_init_rx_queue_buffers();
-#endif
 	/* Function pointer to point to the currently used transmission interface
 	 */
 	sys_if_tx = cb_func->cb_if_tx;
@@ -2273,8 +2184,7 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				else
 					STP_WARN_FUNC("inband reset state,drop the packet\n");
 			} else {
-				gCrcErrorCount++;
-				STP_ERR_FUNC("[%d]CRC error, drop the packet\n", gCrcErrorCount - 1);
+				STP_ERR_FUNC("[%d]CRC error, drop the packet\n", gCrcErrorCount++);
 				osal_buffer_dump(&stp_core_ctx.rx_buf[0], "CRC data", stp_core_ctx.rx_counter, 0);
 				stp_change_rx_state(MTKSTP_SYNC);
 				stp_core_ctx.rx_counter = 0;
@@ -2503,15 +2413,19 @@ INT32 mtk_wcn_stp_dbg_dump_package(VOID)
 
 		if (mtk_wcn_stp_coredump_start_get() == 0 &&
 		    mtk_wcn_stp_get_wmt_trg_assert() == 0) {
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 			if (mtk_wcn_stp_is_sdio_mode()) {
 				stp_dbg_dmp_print(g_mtkstp_dbg);
 				STP_INFO_FUNC("STP_SDIO TX data dump start\n");
 				stp_sdio_txdbg_dump();
 			} else {
+#endif
 				mtk_wcn_consys_stp_btif_logger_ctrl(BTIF_DUMP_BTIF_REG);
 				mtk_wcn_consys_stp_btif_logger_ctrl(BTIF_DUMP_LOG);
 				stp_dbg_dmp_print(g_mtkstp_dbg);
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 			}
+#endif
 		} else
 			STP_INFO_FUNC("assert start flag is set, disable packet dump function\n");
 	}
@@ -2886,10 +2800,6 @@ INT32 mtk_wcn_stp_receive_data(PUINT8 buffer, UINT32 length, UINT8 type)
 	UINT16 copyLen = 0;
 	UINT16 tailLen = 0;
 
-#ifdef CONFIG_MTK_ENABLE_GMO
-	if (unlikely(!stp_core_ctx.ring[type].buffer))
-		return 0;
-#endif
 	osal_ftrace_print("%s|S|T|%d|L|%d\n", __func__, type, length);
 	osal_lock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
 	while (stp_core_ctx.ring[type].read_p != stp_core_ctx.ring[type].write_p) {
@@ -2964,10 +2874,6 @@ INT32 mtk_wcn_stp_is_rxqueue_empty(UINT8 type)
 {
 	INT32 ret;
 
-#ifdef CONFIG_MTK_ENABLE_GMO
-	if (unlikely(!stp_core_ctx.ring[type].buffer))
-		return 1;
-#endif
 	osal_lock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
 
 	if (stp_core_ctx.ring[type].read_p == stp_core_ctx.ring[type].write_p)
@@ -3516,6 +3422,8 @@ INT32 mtk_wcn_stp_wmt_trg_assert(VOID)
 		STP_INFO_FUNC("firmware assert has been triggered\n");
 		return 1;
 	}
+
+	/* trigger assert timer */
 	ret = stp_notify_btm_do_fw_assert(STP_BTM_CORE(stp_core_ctx));
 
 	if (ret) {
@@ -3529,15 +3437,18 @@ INT32 mtk_wcn_stp_wmt_trg_assert(VOID)
 	return ret;
 }
 
+/* run on btmd */
 INT32 mtk_wcn_stp_assert_timeout_handle(VOID)
 {
 	INT32 ret = 0;
 	P_CONSYS_EMI_ADDR_INFO p_ecsi;
 
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	if (wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO) {
 		mtk_wcn_stp_ctx_restore();
 		return ret;
 	}
+#endif
 
 	p_ecsi = wmt_plat_get_emi_phy_add();
 	/* dump btif data */
@@ -3551,7 +3462,8 @@ INT32 mtk_wcn_stp_assert_timeout_handle(VOID)
 	} else {
 		/*host trigger assert timeout and no coredump packet. To dump EMI data*/
 		STP_INFO_FUNC("host trigger fw assert timeout!\n");
-		WMT_STEP_COMMAND_TIMEOUT_DO_ACTIONS_FUNC("Trigger assert timeout");
+
+		wmt_lib_assert_timeout_dump();
 		if (mtk_wcn_stp_coredump_flag_get() != 0)
 			ret = stp_dbg_start_emi_dump();
 		else
@@ -3560,15 +3472,19 @@ INT32 mtk_wcn_stp_assert_timeout_handle(VOID)
 	return ret;
 }
 
+/* run on btmd */
 INT32 mtk_wcn_stp_coredump_timeout_handle(VOID)
 {
 	/* dump btif data */
 	mtk_wcn_consys_stp_btif_logger_ctrl(BTIF_DUMP_BTIF_REG);
 	mtk_wcn_consys_stp_btif_logger_ctrl(BTIF_DUMP_LOG);
 
-	WMT_STEP_COMMAND_TIMEOUT_DO_ACTIONS_FUNC("Coredump timeout");
+	wmt_lib_coredump_timeout_dump();
+
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	if (wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO)
 		mtk_wcn_stp_ctx_restore();
+#endif
 	return 0;
 }
 
@@ -3577,6 +3493,7 @@ VOID mtk_wcn_stp_dbg_pkt_log(INT32 type, INT32 dir)
 	stp_dbg_pkt_log(type, 0, 0, 0, dir, NULL, 0);
 }
 
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 VOID mtk_stp_sdio_retry_flag_ctrl(INT32 flag)
 {
 	if (flag) {
@@ -3600,6 +3517,7 @@ VOID mtk_stp_dump_sdio_register(VOID)
 {
 	stp_sdio_dump_register();
 }
+#endif
 
 INT32 mtk_stp_dbg_dmp_append(PUINT8 buf, INT32 max_len)
 {

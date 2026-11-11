@@ -31,7 +31,6 @@
 ********************************************************************************
 */
 
-#define OSAL_KEEP_COMPAT_FUNCTIONS
 #include "osal.h"
 #include "connectivity_build_in_adapter.h"
 
@@ -1403,7 +1402,7 @@ INT32 osal_usleep_range(ULONG min, ULONG max)
 INT32 osal_gettimeofday(PINT32 sec, PINT32 usec)
 {
 	INT32 ret = 0;
-	struct timeval now;
+	struct timespec64 now;
 
 	osal_do_gettimeofday(&now);
 
@@ -1413,20 +1412,20 @@ INT32 osal_gettimeofday(PINT32 sec, PINT32 usec)
 		ret = -1;
 
 	if (usec != NULL)
-		*usec = now.tv_usec;
+		*usec = now.tv_nsec / NSEC_PER_USEC;
 	else
 		ret = -1;
 
 	return ret;
 }
 
-void osal_do_gettimeofday(struct timeval *tv)
+void osal_do_gettimeofday(struct timespec64 *tv)
 {
 	struct timespec64 now;
 
 	ktime_get_real_ts64(&now);
 	tv->tv_sec = now.tv_sec;
-	tv->tv_usec = now.tv_nsec / NSEC_PER_USEC;
+	tv->tv_nsec = now.tv_nsec;
 }
 
 INT32 osal_printtimeofday(const PUINT8 prefix)
@@ -1686,7 +1685,6 @@ MTK_WCN_BOOL osal_opq_has_op(P_OSAL_OP_Q pOpQ, P_OSAL_OP pOp)
 	return MTK_WCN_BOOL_FALSE;
 }
 
-#if 0
 static VOID osal_op_history_print_work(struct work_struct *work)
 {
 	struct osal_op_history *log_history = container_of(work, struct osal_op_history, dump_work);
@@ -1720,11 +1718,9 @@ static VOID osal_op_history_print_work(struct work_struct *work)
 	kfree(queue);
 	ring_buffer->base = NULL;
 }
-#endif
 
 VOID osal_op_history_init(struct osal_op_history *log_history, INT32 queue_size)
 {
-#if 0
 	int size = queue_size * sizeof(struct osal_op_history_entry);
 
 	spin_lock_init(&(log_history->lock));
@@ -1742,12 +1738,10 @@ VOID osal_op_history_init(struct osal_op_history *log_history, INT32 queue_size)
 		&log_history->ring_buffer);
 
 	INIT_WORK(&log_history->dump_work, osal_op_history_print_work);
-#endif
 }
 
 VOID osal_op_history_print(struct osal_op_history *log_history, PINT8 name)
 {
-#if 0
 	struct osal_op_history_entry *queue = NULL;
 	struct ring *ring_buffer = NULL, *dump_ring_buffer = NULL;
 	INT32 queue_size;
@@ -1787,12 +1781,10 @@ VOID osal_op_history_print(struct osal_op_history *log_history, PINT8 name)
 	dump_ring_buffer->base = queue;
 	spin_unlock_irqrestore(lock, flags);
 	schedule_work(work);
-#endif
 }
 
 VOID osal_op_history_save(struct osal_op_history *log_history, P_OSAL_OP pOp)
 {
-#if 0
 	struct osal_op_history_entry *entry = NULL;
 	struct ring_segment seg;
 	INT32 index;
@@ -1828,5 +1820,4 @@ VOID osal_op_history_save(struct osal_op_history *log_history, P_OSAL_OP pOp)
 	entry->ts = sec;
 	entry->usec = usec;
 	spin_unlock_irqrestore(&(log_history->lock), flags);
-#endif
 }

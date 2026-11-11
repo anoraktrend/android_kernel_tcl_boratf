@@ -13,9 +13,8 @@
 
 #include "stp_dbg.h"
 #include "stp_dbg_combo.h"
-#include <linux/slab.h>
-
-#define STP_DBG_COMBO_BUF_SIZE 2048
+#include "stp_sdio.h"
+#include "stp_core.h"
 
 static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_aee(VOID);
 static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_nl(VOID);
@@ -56,21 +55,15 @@ INT32 const combo_legacy_task_id_adapter[STP_DBG_TASK_ID_MAX] = {
 
 static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_aee(VOID)
 {
-	UINT8 *scratch;
-	UINT8 *buf;
-	UINT8 *tmp;
+	static UINT8 buf[2048];
+	static UINT8 tmp[2048];
+
 	UINT32 buf_len;
 	STP_PACKET_T *pkt = NULL;
 	STP_DBG_HDR_T *hdr = NULL;
 	INT32 remain = 0;
 	INT32 retry = 0;
 	INT32 ret = 0;
-
-	scratch = kmalloc(2 * STP_DBG_COMBO_BUF_SIZE, GFP_KERNEL);
-	if (!scratch)
-		return -ENOMEM;
-	buf = scratch;
-	tmp = scratch + STP_DBG_COMBO_BUF_SIZE;
 
 	do {
 		remain = stp_dbg_dmp_out_ex(&buf[0], &buf_len);
@@ -99,7 +92,6 @@ static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_aee(VOID)
 		}
 	} while ((remain > 0) || (retry < 10));
 
-	kfree(scratch);
 	return ret;
 }
 
@@ -107,9 +99,9 @@ static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_nl(VOID)
 {
 #define NUM_FETCH_ENTRY 8
 
-	UINT8 *scratch;
-	UINT8 *buf;
-	UINT8 *tmp;
+	static UINT8 buf[2048];
+	static UINT8 tmp[2048];
+
 	UINT32 buf_len;
 	STP_PACKET_T *pkt = NULL;
 	STP_DBG_HDR_T *hdr = NULL;
@@ -118,12 +110,6 @@ static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_nl(VOID)
 	INT32 retry = 0;
 	INT32 ret = 0;
 	INT32 len;
-
-	scratch = kmalloc(2 * STP_DBG_COMBO_BUF_SIZE, GFP_KERNEL);
-	if (!scratch)
-		return -ENOMEM;
-	buf = scratch;
-	tmp = scratch + STP_DBG_COMBO_BUF_SIZE;
 
 	index = 0;
 	tmp[index++] = '[';
@@ -164,7 +150,6 @@ static _osal_inline_ INT32 stp_dbg_combo_put_dump_to_nl(VOID)
 		}
 	} while ((remain > 0) || (retry < 2));
 
-	kfree(scratch);
 	return ret;
 }
 
@@ -210,4 +195,78 @@ PUINT8 stp_dbg_combo_id_to_task(UINT32 id)
 	}
 
 	return combo_task_str[temp_id];
+}
+
+INT32 stp_dbg_combo_poll_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd)
+{
+	INT32 i = 0;
+	UINT32 value = 0x0;
+	INT32 i_ret = 0;
+	INT32 count = 0;
+	INT32 chip_id = -1;
+	UINT8 cccr_value = 0x0;
+	UINT32 buffer[STP_DBG_CPUPCR_NUM];
+	UINT64 sec_buffer[STP_DBG_CPUPCR_NUM];
+	ULONG nsec_buffer[STP_DBG_CPUPCR_NUM];
+
+	if (times > STP_DBG_CPUPCR_NUM)
+		times = STP_DBG_CPUPCR_NUM;
+
+	for (i = 0; i < times; i++) {
+		stp_sdio_rw_retry(HIF_TYPE_READL, STP_SDIO_RETRY_LIMIT,
+				g_stp_sdio_host_info.sdio_cltctx, SWPCDBGR, &value, 0);
+		buffer[i] = value;
+		osal_get_local_time(&(sec_buffer[i]),
+				&(nsec_buffer[i]));
+		if (sleep > 0)
+			osal_sleep_ms(sleep);
+	}
+
+	if (cmd) {
+		UINT8 str[DBG_LOG_STR_SIZE] = {""};
+		PUINT8 p = str;
+		INT32 str_len = 0;
+
+		for (i = 0; i < STP_DBG_CPUPCR_NUM; i++) {
+			if (sec_buffer[i] == 0 && nsec_buffer[i] == 0)
+				continue;
+
+			count++;
+			if (count % 4 != 0) {
+				str_len = osal_sprintf(p, "%llu.%06lu/0x%08x;",
+						       sec_buffer[i],
+						       nsec_buffer[i],
+						       buffer[i]);
+				p += str_len;
+			} else {
+				str_len = osal_sprintf(p, "%llu.%06lu/0x%08x;",
+						       sec_buffer[i],
+						       nsec_buffer[i],
+						       buffer[i]);
+				STP_DBG_PR_INFO("TIME/CPUPCR: %s\n", str);
+				p = str;
+			}
+		}
+		if (count % 4 != 0)
+			STP_DBG_PR_INFO("TIME/CPUPCR: %s\n", str);
+
+		chip_id = mtk_wcn_wmt_chipid_query();
+		if (chip_id == 0x6632) {
+			for (i = 0; i < 8; i++) {
+				i_ret = mtk_wcn_hif_sdio_f0_readb(g_stp_sdio_host_info.sdio_cltctx,
+						CCCR_F8 + i, &cccr_value);
+				if (i_ret)
+					STP_DBG_PR_ERR("read CCCR fail(%d), address(0x%x)\n",
+							i_ret, CCCR_F8 + i);
+				else
+					STP_DBG_PR_INFO("read CCCR value(0x%x), address(0x%x)\n",
+							cccr_value, CCCR_F8 + i);
+				cccr_value = 0x0;
+			}
+		}
+	}
+	STP_DBG_PR_INFO("dump sdio register for debug\n");
+	mtk_stp_dump_sdio_register();
+
+	return 0;
 }

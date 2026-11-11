@@ -25,13 +25,11 @@ INT32 gPsmDbgLevel = STP_PSM_LOG_INFO;
 MTKSTP_PSM_T stp_psm_i;
 MTKSTP_PSM_T *stp_psm = &stp_psm_i;
 
-#ifndef CONFIG_MTK_ENABLE_GMO
 STP_PSM_RECORD_T *g_stp_psm_dbg;
 static UINT32 g_record_num;
 
 P_STP_PSM_OPID_RECORD g_stp_psm_opid_dbg;
 static UINT32 g_opid_record_num;
-#endif
 
 static UINT32 stp_traffic_start;
 static UINT32 stp_traffic_current;
@@ -66,19 +64,10 @@ do { \
 static inline INT32 _stp_psm_notify_wmt(MTKSTP_PSM_T *stp_psm, const MTKSTP_PSM_ACTION_T action);
 static INT32 _stp_psm_thread_lock_aquire(MTKSTP_PSM_T *stp_psm);
 static INT32 _stp_psm_thread_lock_release(MTKSTP_PSM_T *stp_psm);
-#ifndef CONFIG_MTK_ENABLE_GMO
-static INT32 _stp_psm_dbg_dmp_in(STP_PSM_RECORD_T *stp_psm_dbg,
-		UINT32 flag, UINT32 line_num);
+static INT32 _stp_psm_dbg_dmp_in(STP_PSM_RECORD_T *stp_psm_dbg, UINT32 flag, UINT32 line_num);
 static INT32 _stp_psm_dbg_out_printk(STP_PSM_RECORD_T *stp_psm_dbg);
-static INT32 _stp_psm_opid_dbg_dmp_in(P_STP_PSM_OPID_RECORD p_opid_dbg,
-		UINT32 opid, UINT32 line_num);
+static INT32 _stp_psm_opid_dbg_dmp_in(P_STP_PSM_OPID_RECORD p_opid_dbg, UINT32 opid, UINT32 line_num);
 static INT32 _stp_psm_opid_dbg_out_printk(P_STP_PSM_OPID_RECORD p_opid_dbg);
-#else
-#define _stp_psm_dbg_dmp_in(...) ((void)0)
-#define _stp_psm_dbg_out_printk(...) ((void)0)
-#define _stp_psm_opid_dbg_dmp_in(...) ((void)0)
-#define _stp_psm_opid_dbg_out_printk(...) ((void)0)
-#endif
 
 
 static const PINT8 g_psm_state[STP_PSM_MAX_STATE] = {
@@ -111,11 +100,6 @@ static INT32 _stp_psm_is_redundant_active_op(P_OSAL_OP pOp, P_OSAL_OP_Q pOpQ);
 
 static INT32 _stp_psm_clean_up_redundant_active_op(P_OSAL_OP_Q pOpQ);
 static MTK_WCN_BOOL _stp_psm_is_quick_ps_support(VOID);
-
-ENUM_STP_TX_IF_TYPE __weak wmt_plat_get_comm_if_type(VOID)
-{
-	return STP_MAX_IF_TX;
-}
 
 MTK_WCN_BOOL mtk_wcn_stp_psm_dbg_level(INT32 dbglevel)
 {
@@ -518,7 +502,7 @@ INT32 _stp_psm_put_act_op(MTKSTP_PSM_T *stp_psm, P_OSAL_OP pOp)
 		}
 	} while (0);
 
-	if (pOp && atomic_dec_and_test(&pOp->ref_count)) {
+	if (stp_psm && pOp && atomic_dec_and_test(&pOp->ref_count)) {
 		/* put Op back to freeQ */
 		bRet = _stp_psm_put_op(stp_psm, &stp_psm->rFreeOpQ, pOp);
 		if (bRet == 0)
@@ -1361,13 +1345,23 @@ static inline INT32 _stp_psm_do_wait(MTKSTP_PSM_T *stp_psm, MTKSTP_PSM_STATE_T s
 #define POLL_WAIT_TIME 2000
 	INT32 i = 0;
 	INT32 limit = POLL_WAIT_TIME / POLL_WAIT;
+	UINT64 sec = 0;
+	ULONG usec = 0;
 
 	if (state < 0 || state >= STP_PSM_MAX_STATE)
 		return STP_PSM_OPERATION_FAIL;
 
+	osal_get_local_time(&sec, &usec);
 	while (_stp_psm_get_state(stp_psm) != state && i < limit && mtk_wcn_stp_is_enable()) {
 		i++;
+		if (i < 3)
+			STP_PSM_PR_INFO("STP is waiting state for %s, i=%d, state = %d\n",
+					  g_psm_state[state], i, _stp_psm_get_state(stp_psm));
 		osal_sleep_ms(POLL_WAIT);
+		if (i == 10) {
+			STP_PSM_PR_WARN("-Wait for %s takes %d msec\n", g_psm_state[state], i * POLL_WAIT);
+			_stp_psm_opid_dbg_out_printk(g_stp_psm_opid_dbg);
+		}
 	}
 	if (mtk_wcn_stp_is_enable() == 0) {
 		STP_PSM_PR_INFO("STP disable, maybe do chip reset");
@@ -1375,10 +1369,14 @@ static inline INT32 _stp_psm_do_wait(MTKSTP_PSM_T *stp_psm, MTKSTP_PSM_STATE_T s
 	}
 
 	if (i == limit) {
+		STP_PSM_PR_WARN("-Wait for %s takes %llu usec\n", g_psm_state[state], osal_elapsed_us(sec, usec));
 		mtk_wcn_wmt_dump_wmtd_backtrace();
 		_stp_psm_opid_dbg_out_printk(g_stp_psm_opid_dbg);
 		return STP_PSM_OPERATION_FAIL;
 	}
+	if (i > 0)
+		STP_PSM_PR_INFO("+Total waits for %s takes %llu usec\n",
+					g_psm_state[state], osal_elapsed_us(sec, usec));
 	return STP_PSM_OPERATION_SUCCESS;
 }
 
@@ -1587,7 +1585,7 @@ INT32 stp_psm_disable_by_tx_rx_density(MTKSTP_PSM_T *stp_psm, INT32 dir)
 	return 0;
 }
 #else
-static struct timeval tv_now, tv_end;
+static struct timespec64 tv_now, tv_end;
 static INT32 sample_start;
 static INT32 tx_sum_len;
 static INT32 rx_sum_len;
@@ -1605,14 +1603,16 @@ INT32 stp_psm_disable_by_tx_rx_density(MTKSTP_PSM_T *stp_psm, INT32 dir, INT32 l
 		/* STP_PSM_PR_INFO("tv_now:%d.%d tv_end:%d.%d\n", tv_now.tv_sec, tv_now.tv_usec,
 		 * tv_end.tv_sec,tv_end.tv_usec);
 		 */
-		if (((tv_now.tv_sec == tv_end.tv_sec) && (tv_now.tv_usec > tv_end.tv_usec)) ||
+		if (((tv_now.tv_sec == tv_end.tv_sec) && (tv_now.tv_nsec > tv_end.tv_nsec)) ||
 		    (tv_now.tv_sec > tv_end.tv_sec)) {
+			STP_PSM_PR_INFO("STP speed rx:%d tx:%d\n", rx_sum_len, tx_sum_len);
 			if ((rx_sum_len + tx_sum_len) > RTX_SPEED_THRESHOLD) {
 				STP_PSM_PR_INFO("High speed,Disable monitor\n");
 				osal_set_bit(STP_PSM_WMT_EVENT_DISABLE_MONITOR_TX_HIGH_DENSITY, &stp_psm->flag);
 				stp_psm->idle_time_to_sleep = STP_PSM_IDLE_TIME_SLEEP_1000;
 				stp_psm_start_monitor(stp_psm);
 			} else {
+				STP_PSM_PR_INFO("Low speed,Enable monitor\n");
 				stp_psm->idle_time_to_sleep = STP_PSM_IDLE_TIME_SLEEP;
 				osal_clear_bit(STP_PSM_WMT_EVENT_DISABLE_MONITOR_TX_HIGH_DENSITY, &stp_psm->flag);
 			}
@@ -1782,11 +1782,10 @@ INT32 stp_psm_check_sleep_enable(MTKSTP_PSM_T *stp_psm)
 	return ret;
 }
 
-#ifndef CONFIG_MTK_ENABLE_GMO
 static INT32 _stp_psm_dbg_dmp_in(STP_PSM_RECORD_T *stp_psm_dbg, UINT32 flag, UINT32 line_num)
 {
 	INT32 index = 0;
-	struct timeval now;
+	struct timespec64 now;
 
 	if (stp_psm_dbg) {
 		osal_lock_unsleepable_lock(&stp_psm_dbg->lock);
@@ -1799,7 +1798,7 @@ static INT32 _stp_psm_dbg_dmp_in(STP_PSM_RECORD_T *stp_psm_dbg, UINT32 flag, UIN
 		stp_psm_dbg->queue[stp_psm_dbg->in].line_num = line_num;
 		stp_psm_dbg->queue[stp_psm_dbg->in].package_no = g_record_num++;
 		stp_psm_dbg->queue[stp_psm_dbg->in].sec = now.tv_sec;
-		stp_psm_dbg->queue[stp_psm_dbg->in].usec = now.tv_usec;
+		stp_psm_dbg->queue[stp_psm_dbg->in].usec = now.tv_nsec / NSEC_PER_USEC;
 		stp_psm_dbg->size++;
 		STP_PSM_PR_DBG("pre_Flag = %d, cur_flag = %d\n", stp_psm_dbg->queue[stp_psm_dbg->in].prev_flag,
 				 stp_psm_dbg->queue[stp_psm_dbg->in].cur_flag);
@@ -1855,7 +1854,7 @@ static INT32 _stp_psm_dbg_out_printk(STP_PSM_RECORD_T *stp_psm_dbg)
 static INT32 _stp_psm_opid_dbg_dmp_in(P_STP_PSM_OPID_RECORD p_opid_dbg, UINT32 opid, UINT32 line_num)
 {
 	INT32 index = 0;
-	struct timeval now;
+	struct timespec64 now;
 	UINT64 ts;
 	ULONG nsec;
 
@@ -1871,7 +1870,7 @@ static INT32 _stp_psm_opid_dbg_dmp_in(P_STP_PSM_OPID_RECORD p_opid_dbg, UINT32 o
 		p_opid_dbg->queue[p_opid_dbg->in].line_num = line_num;
 		p_opid_dbg->queue[p_opid_dbg->in].package_no = g_opid_record_num++;
 		p_opid_dbg->queue[p_opid_dbg->in].sec = now.tv_sec;
-		p_opid_dbg->queue[p_opid_dbg->in].usec = now.tv_usec;
+		p_opid_dbg->queue[p_opid_dbg->in].usec = now.tv_nsec / NSEC_PER_USEC;
 		p_opid_dbg->queue[p_opid_dbg->in].pid = current->pid;
 		p_opid_dbg->queue[p_opid_dbg->in].l_sec = ts;
 		p_opid_dbg->queue[p_opid_dbg->in].l_nsec = nsec;
@@ -1931,7 +1930,6 @@ static INT32 _stp_psm_opid_dbg_out_printk(P_STP_PSM_OPID_RECORD p_opid_dbg)
 	return 0;
 
 }
-#endif
 
 VOID stp_psm_print_op_history(VOID)
 {
@@ -2010,7 +2008,6 @@ MTKSTP_PSM_T *stp_psm_init(VOID)
 		goto ERR_EXIT6;
 	}
 
-#ifndef CONFIG_MTK_ENABLE_GMO
 	g_stp_psm_dbg = (STP_PSM_RECORD_T *) osal_malloc(osal_sizeof(STP_PSM_RECORD_T));
 	if (!g_stp_psm_dbg) {
 		STP_PSM_PR_ERR("stp psm dbg allocate memory fail!\n");
@@ -2026,7 +2023,6 @@ MTKSTP_PSM_T *stp_psm_init(VOID)
 	}
 	osal_memset(g_stp_psm_opid_dbg, 0, osal_sizeof(STP_PSM_OPID_RECORD));
 	osal_unsleepable_lock_init(&g_stp_psm_opid_dbg->lock);
-#endif
 
 	return stp_psm;
 
@@ -2049,18 +2045,11 @@ INT32 stp_psm_deinit(MTKSTP_PSM_T *stp_psm)
 	INT32 ret = -1;
 
 	STP_PSM_PR_INFO("psm deinit\n");
-#ifndef CONFIG_MTK_ENABLE_GMO
 	if (g_stp_psm_dbg) {
 		osal_unsleepable_lock_deinit(&g_stp_psm_dbg->lock);
 		osal_free(g_stp_psm_dbg);
 		g_stp_psm_dbg = NULL;
 	}
-	if (g_stp_psm_opid_dbg) {
-		osal_unsleepable_lock_deinit(&g_stp_psm_opid_dbg->lock);
-		osal_free(g_stp_psm_opid_dbg);
-		g_stp_psm_opid_dbg = NULL;
-	}
-#endif
 
 	if (!stp_psm)
 		return STP_PSM_OPERATION_FAIL;

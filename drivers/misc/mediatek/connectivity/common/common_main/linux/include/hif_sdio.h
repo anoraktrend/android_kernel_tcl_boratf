@@ -249,23 +249,23 @@ extern INT32 gHifSdioDbgLvl;
 
 #define HIF_SDIO_LOUD_FUNC(fmt, arg...)	\
 do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_LOUD)	\
-	pr_debug(DFT_TAG"[L]%s:" fmt, __func__, ##arg);	\
+	osal_warn_print(DFT_TAG"[L]%s:"  fmt, __func__, ##arg);	\
 } while (0)
 #define HIF_SDIO_DBG_FUNC(fmt, arg...)	\
 do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_DBG)	\
-	pr_debug(DFT_TAG"[D]%s:" fmt, __func__, ##arg);	\
+	osal_warn_print(DFT_TAG"[D]%s:"  fmt, __func__, ##arg);	\
 } while (0)
 #define HIF_SDIO_INFO_FUNC(fmt, arg...)	\
 do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_INFO)	\
-	pr_info(DFT_TAG"[I]%s:" fmt, __func__, ##arg);	\
+	osal_warn_print(DFT_TAG"[I]%s:"  fmt, __func__, ##arg);	\
 } while (0)
 #define HIF_SDIO_WARN_FUNC(fmt, arg...)	\
 do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_WARN)	\
-	pr_warn(DFT_TAG"[W]%s(%d):" fmt, __func__, __LINE__, ##arg);	\
+	osal_warn_print(DFT_TAG"[W]%s(%d):"  fmt, __func__, __LINE__, ##arg);	\
 } while (0)
 #define HIF_SDIO_ERR_FUNC(fmt, arg...)	\
 do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_ERR)	\
-	pr_err(DFT_TAG"[E]%s(%d):" fmt, __func__, __LINE__, ##arg);	\
+	osal_err_print(DFT_TAG"[E]%s(%d):"  fmt, __func__, __LINE__, ##arg);	\
 } while (0)
 
 /*!
@@ -276,13 +276,13 @@ do { if (gHifSdioDbgLvl >= HIF_SDIO_LOG_ERR)	\
 #define HIF_SDIO_ASSERT(expr) \
 { \
 		if (!(expr)) { \
-			pr_warn("assertion failed! %s[%d]: %s\n",\
+			osal_warn_print("assertion failed! %s[%d]: %s\n",\
 					__func__, __LINE__, #expr); \
-			WARN_ON(!(expr));\
+			osal_bug_on(!(expr));\
 		} \
 }
 #else
-#define HIF_SDIO_ASSERT(expr)    ((void)0)
+#define HIF_SDIO_ASSERT(expr)    do {} while (0)
 #endif
 
 /* define function 0 CR */

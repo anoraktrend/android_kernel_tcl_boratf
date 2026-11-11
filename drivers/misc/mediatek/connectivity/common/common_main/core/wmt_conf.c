@@ -99,7 +99,6 @@ static INT32 wmt_conf_parse(P_DEV_WMT pWmtDev, const PINT8 pInBuf, UINT32 size);
 *                          F U N C T I O N S
 ********************************************************************************
 */
-
 static const struct parse_data wmtcfg_fields[] = {
 	CHAR(coex_wmt_ant_mode),
 	CHAR(coex_wmt_ant_mode_ex),
@@ -180,6 +179,8 @@ static const struct parse_data wmtcfg_fields[] = {
 
 	/* This is an open config whose actual purpose is decided by WIFI. */
 	BYTE_ARRAY(wifi_config),
+
+	INT(vcn33_1_voltage),
 };
 
 #define NUM_WMTCFG_FIELDS (osal_sizeof(wmtcfg_fields) / osal_sizeof(wmtcfg_fields[0]))
@@ -368,7 +369,7 @@ static INT32 wmt_conf_parse_byte_array(P_DEV_WMT pWmtDev,
 		WMT_ERR_FUNC("wmtcfg==> %s has no value assigned\n",
 			data->name);
 		return -1;
-	} else if (size & 0x1) {
+	} else if (osal_strlen(pos) & 0x1) {
 		WMT_ERR_FUNC("wmtcfg==> %s, length should be even\n", data->name);
 		return -1;
 	}

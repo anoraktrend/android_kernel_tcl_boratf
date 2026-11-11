@@ -337,7 +337,7 @@ static ssize_t procCfgRead(struct file *filp, char __user *buf, size_t count,
 	struct WLAN_CFG_ENTRY *prWlanCfgEntry;
 	struct ADAPTER *prAdapter;
 
-	prGlueInfo = *((struct GLUE_INFO **)netdev_priv(gPrDev));
+	prGlueInfo = g_prGlueInfo_proc;
 
 	if (!prGlueInfo) {
 		pr_err("procCfgRead prGlueInfo is  NULL????\n");
@@ -385,9 +385,8 @@ static ssize_t procCfgRead(struct file *filp, char __user *buf, size_t count,
 			       WLAN_CFG_VALUE_LEN_MAX,
 			       (uint32_t)prWlanCfgEntry->aucValue[
 				WLAN_CFG_VALUE_LEN_MAX - 1]);
-			kalMemSet(g_aucProcBuf, ' ', u4StrLen);
+			kalMemSet(g_aucProcBuf, 0, u4StrLen);
 			kalStrnCpy(g_aucProcBuf, str2, kalStrLen(str2) + 1);
-			g_aucProcBuf[u4StrLen-1] = 0;
 			goto procCfgReadLabel;
 		}
 
@@ -418,9 +417,8 @@ static ssize_t procCfgRead(struct file *filp, char __user *buf, size_t count,
 			       WLAN_CFG_VALUE_LEN_MAX,
 			       (uint32_t)prWlanCfgEntry->aucValue[
 				WLAN_CFG_VALUE_LEN_MAX - 1]);
-			kalMemSet(g_aucProcBuf, ' ', u4StrLen);
+			kalMemSet(g_aucProcBuf, 0, u4StrLen);
 			kalStrnCpy(g_aucProcBuf, str2, kalStrLen(str2) + 1);
-			g_aucProcBuf[u4StrLen-1] = 0;
 			goto procCfgReadLabel;
 		}
 
@@ -445,15 +443,15 @@ procCfgReadLabel:
 static ssize_t procCfgWrite(struct file *file, const char __user *buffer,
 	size_t count, loff_t *data)
 {
-
-	/*      uint32_t u4DriverCmd, u4DriverValue;
-	 *uint8_t *temp = &g_aucProcBuf[0];
-	 */
 	uint32_t u4CopySize = sizeof(g_aucProcBuf)-8;
 	struct GLUE_INFO *prGlueInfo;
 	uint8_t *pucTmp;
-	/* PARAM_CUSTOM_P2P_SET_STRUCT_T rSetP2P; */
 	uint32_t i = 0;
+
+	if (count <= 0) {
+		DBGLOG(INIT, ERROR, "wrong copy size\n");
+		return -EFAULT;
+	}
 
 	kalMemSet(g_aucProcBuf, 0, u4CopySize);
 	u4CopySize = (count < u4CopySize) ? count : (u4CopySize - 1);
@@ -467,7 +465,7 @@ static ssize_t procCfgWrite(struct file *file, const char __user *buffer,
 	}
 	g_aucProcBuf[u4CopySize + 8] = '\0';
 
-	for (i = 8 ; i < u4CopySize+8; i++) {
+	for (i = 8 ; i < u4CopySize + 8; i++) {
 		if (!isalnum(g_aucProcBuf[i]) && /* alphanumeric */
 			g_aucProcBuf[i] != 0x20 && /* space */
 			g_aucProcBuf[i] != 0x0a && /* control char */
@@ -603,16 +601,39 @@ static ssize_t procDbgLevelWrite(struct file *file, const char __user *buffer,
 	}
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops dbglevel_ops = {
+	.proc_read = procDbgLevelRead,
+	.proc_write = procDbgLevelWrite,
+};
+#else
 static const struct file_operations dbglevel_ops = {
 	.owner = THIS_MODULE,
 	.read = procDbgLevelRead,
 	.write = procDbgLevelWrite,
 };
+#endif
 
 #if WLAN_INCLUDE_PROC
 #if	CFG_SUPPORT_EASY_DEBUG
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops efusedump_ops = {
+	.proc_open = procEfuseDumpOpen,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = seq_release,
+};
 
+static const struct proc_ops drivercmd_ops = {
+	.proc_read = procDriverCmdRead,
+	.proc_write = procDriverCmdWrite,
+};
+
+static const struct proc_ops cfg_ops = {
+	.proc_read = procCfgRead,
+	.proc_write = procCfgWrite,
+};
+#else
 static const struct file_operations efusedump_ops = {
 	.owner = THIS_MODULE,
 	.open = procEfuseDumpOpen,
@@ -632,6 +653,7 @@ static const struct file_operations cfg_ops = {
 	.read = procCfgRead,
 	.write = procCfgWrite,
 };
+#endif
 #endif
 #endif
 
@@ -765,12 +787,18 @@ static ssize_t procMCRWrite(struct file *file, const char __user *buffer,
 	return count;
 
 }				/* end of procMCRWrite() */
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops mcr_ops = {
+	.proc_read = procMCRRead,
+	.proc_write = procMCRWrite,
+};
+#else
 static const struct file_operations mcr_ops = {
 	.owner = THIS_MODULE,
 	.read = procMCRRead,
 	.write = procMCRWrite,
 };
+#endif
 
 #if CFG_SUPPORT_SET_CAM_BY_PROC
 static ssize_t procSetCamCfgWrite(struct file *file, const char __user *buffer,
@@ -840,11 +868,16 @@ static ssize_t procSetCamCfgWrite(struct file *file, const char __user *buffer,
 
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops proc_set_cam_ops = {
+	.proc_write = procSetCamCfgWrite,
+};
+#else
 static const struct file_operations proc_set_cam_ops = {
 	.owner = THIS_MODULE,
 	.write = procSetCamCfgWrite,
 };
+#endif
 #endif /*CFG_SUPPORT_SET_CAM_BY_PROC */
 
 static ssize_t procPktDelayDbgCfgRead(struct file *filp, char __user *buf,
@@ -974,12 +1007,18 @@ static ssize_t procPktDelayDbgCfgWrite(struct file *file, const char *buffer,
 #endif
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops proc_pkt_delay_dbg_ops = {
+	.proc_read = procPktDelayDbgCfgRead,
+	.proc_write = procPktDelayDbgCfgWrite,
+};
+#else
 static const struct file_operations proc_pkt_delay_dbg_ops = {
 	.owner = THIS_MODULE,
 	.read = procPktDelayDbgCfgRead,
 	.write = procPktDelayDbgCfgWrite,
 };
+#endif
 
 #if CFG_SUPPORT_DEBUG_FS
 static ssize_t procRoamRead(struct file *filp, char __user *buf,
@@ -1046,12 +1085,18 @@ static ssize_t procRoamWrite(struct file *file, const char __user *buffer,
 	}
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops roam_ops = {
+	.proc_read = procRoamRead,
+	.proc_write = procRoamWrite,
+};
+#else
 static const struct file_operations roam_ops = {
 	.owner = THIS_MODULE,
 	.read = procRoamRead,
 	.write = procRoamWrite,
 };
+#endif
 #endif
 
 static ssize_t procCountryRead(struct file *filp, char __user *buf,
@@ -1109,12 +1154,18 @@ static ssize_t procCountryWrite(struct file *file, const char __user *buffer,
 	}
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops country_ops = {
+	.proc_read = procCountryRead,
+	.proc_write = procCountryWrite,
+};
+#else
 static const struct file_operations country_ops = {
 	.owner = THIS_MODULE,
 	.read = procCountryRead,
 	.write = procCountryWrite,
 };
+#endif
 
 static ssize_t procAutoPerfCfgRead(struct file *filp, char __user *buf,
 	size_t count, loff_t *f_pos)
@@ -1152,8 +1203,6 @@ static ssize_t procAutoPerfCfgRead(struct file *filp, char __user *buf,
 static ssize_t procAutoPerfCfgWrite(struct file *file, const char *buffer,
 	size_t count, loff_t *data)
 {
-	uint32_t u4CoreNum = 0;
-	uint32_t u4CoreFreq = 0;
 	uint8_t *temp = &g_aucProcBuf[0];
 	uint32_t u4CopySize = count;
 	uint8_t i = 0;
@@ -1171,14 +1220,6 @@ static ssize_t procAutoPerfCfgWrite(struct file *file, const char *buffer,
 	}
 
 	g_aucProcBuf[u4CopySize] = '\0';
-
-	i = sscanf(temp, "%d:%d", &u4CoreNum, &u4CoreFreq);
-	if (i == 2) {
-		DBGLOG(INIT, INFO, "u4CoreNum:%d, u4CoreFreq:%d\n", u4CoreNum,
-			u4CoreFreq);
-		kalSetCpuNumFreq(u4CoreNum, u4CoreFreq);
-		return u4CopySize;
-	}
 
 	if (strlen(temp) > sizeof(aucBuf)) {
 		DBGLOG(INIT, WARN,
@@ -1198,12 +1239,18 @@ static ssize_t procAutoPerfCfgWrite(struct file *file, const char *buffer,
 
 	return -EFAULT;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops auto_perf_ops = {
+	.proc_read = procAutoPerfCfgRead,
+	.proc_write = procAutoPerfCfgWrite,
+};
+#else
 static const struct file_operations auto_perf_ops = {
 	.owner = THIS_MODULE,
 	.read = procAutoPerfCfgRead,
 	.write = procAutoPerfCfgWrite,
 };
+#endif
 
 #if (CFG_TWT_SMART_STA == 1)
 static ssize_t procTwtSmartRead(struct file *filp, char __user *buf,
@@ -1367,12 +1414,18 @@ static ssize_t procCalResultWrite(struct file *file, const char __user *buffer,
 
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops cal_result_ops = {
+	.proc_read = procCalResultRead,
+	.proc_write = procCalResultWrite,
+};
+#else
 static const struct file_operations cal_result_ops = {
 	.owner = THIS_MODULE,
 	.read = procCalResultRead,
 	.write = procCalResultWrite,
 };
+#endif
 #endif /*(CFG_SUPPORT_PRE_ON_PHY_ACTION == 1)*/
 
 int32_t procInitFs(void)
@@ -1920,6 +1973,11 @@ static ssize_t cfgWrite(struct file *filp, const char __user *buf,
 	uint32_t u4CopySize = sizeof(aucCfgBuf);
 	uint8_t token_num = 1;
 
+	if (count <= 0) {
+		DBGLOG(INIT, ERROR, "wrong copy size\n");
+		return -EFAULT;
+	}
+
 	kalMemSet(aucCfgBuf, 0, u4CopySize);
 	u4CopySize = (count < u4CopySize) ? count : (u4CopySize - 1);
 
@@ -1928,7 +1986,7 @@ static ssize_t cfgWrite(struct file *filp, const char __user *buf,
 		return -EFAULT;
 	}
 	aucCfgBuf[u4CopySize] = '\0';
-	for (; i < u4CopySize; i++) {
+	for (i = 0; i < u4CopySize; i++) {
 		if (aucCfgBuf[i] == ' ') {
 			token_num++;
 			break;
@@ -1937,24 +1995,31 @@ static ssize_t cfgWrite(struct file *filp, const char __user *buf,
 
 	if (token_num == 1) {
 		kalMemSet(aucCfgQueryKey, 0, sizeof(aucCfgQueryKey));
+		u4CopySize = (u4CopySize < sizeof(aucCfgQueryKey)) ?
+			u4CopySize : sizeof(aucCfgQueryKey);
+
 		/* remove the 0x0a */
 		memcpy(aucCfgQueryKey, aucCfgBuf, u4CopySize);
 		if (aucCfgQueryKey[u4CopySize - 1] == 0x0a)
 			aucCfgQueryKey[u4CopySize - 1] = '\0';
 	} else {
-		if (u4CopySize)
-			wlanFwCfgParse(gprGlueInfo->prAdapter, aucCfgBuf);
+		wlanFwCfgParse(gprGlueInfo->prAdapter, aucCfgBuf);
 	}
 
 	return count;
 }
-
+#if KERNEL_VERSION(5, 6, 0) <= CFG80211_VERSION_CODE
+static const struct proc_ops fwcfg_ops = {
+	.proc_read = cfgRead,
+	.proc_write = cfgWrite,
+};
+#else
 static const struct file_operations fwcfg_ops = {
 	.owner = THIS_MODULE,
 	.read = cfgRead,
 	.write = cfgWrite,
 };
-
+#endif
 int32_t cfgRemoveProcEntry(void)
 {
 	remove_proc_entry(PROC_CFG_NAME, gprProcRoot);

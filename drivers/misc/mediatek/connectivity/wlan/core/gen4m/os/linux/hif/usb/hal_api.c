@@ -170,8 +170,10 @@ u_int8_t halVerifyChipID(IN struct ADAPTER *prAdapter)
 }
 
 uint32_t
-halRxWaitResponse(IN struct ADAPTER *prAdapter, IN uint8_t ucPortIdx, OUT uint8_t *pucRspBuffer,
-		  IN uint32_t u4MaxRespBufferLen, OUT uint32_t *pu4Length)
+halRxWaitResponse(IN struct ADAPTER *prAdapter,
+		  IN uint8_t ucPortIdx, OUT uint8_t *pucRspBuffer,
+		  IN uint32_t u4MaxRespBufferLen, OUT uint32_t *pu4Length,
+		  IN uint32_t u4WaitingInterval, IN uint32_t u4TimeoutValue)
 {
 	struct GL_HIF_INFO *prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 	uint32_t u4Status = WLAN_STATUS_SUCCESS;
@@ -948,7 +950,7 @@ void halRxUSBReceiveEventComplete(struct urb *urb)
 	}
 
 	/* Hif power off wifi, drop rx packets and continue polling RX packets until RX path empty */
-	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
+	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxEventFreeQ, prUsbReq, &prHifInfo->rRxEventQLock, FALSE);
 		halRxUSBReceiveEvent(prGlueInfo->prAdapter, FALSE);
 		return;
@@ -1030,7 +1032,7 @@ void halRxUSBReceiveDataComplete(struct urb *urb)
 	}
 
 	/* Hif power off wifi, drop rx packets and continue polling RX packets until RX path empty */
-	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
+	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxDataFreeQ, prUsbReq, &prHifInfo->rRxDataQLock, FALSE);
 		halRxUSBReceiveData(prGlueInfo->prAdapter);
 		return;
@@ -1124,7 +1126,7 @@ void halRxUSBProcessEventDataComplete(IN struct ADAPTER *prAdapter,
 			set_bit(GLUE_FLAG_RX_BIT, &prGlueInfo->ulFlag);
 			wake_up_interruptible(&prGlueInfo->waitq);
 
-			schedule_delayed_work(&prGlueInfo->rRxPktDeAggWork, MSEC_TO_JIFFIES(SW_RFB_RECHECK_MS));
+			queue_delayed_work(system_power_efficient_wq, &prGlueInfo->rRxPktDeAggWork, MSEC_TO_JIFFIES(SW_RFB_RECHECK_MS));
 			break;
 		}
 
@@ -1273,6 +1275,11 @@ void halDevInit(IN struct ADAPTER *prAdapter)
 
 	glUdmaRxAggEnable(prGlueInfo, FALSE);
 	glUdmaTxRxEnable(prGlueInfo, TRUE);
+}
+
+u_int8_t halTxIsCmdBufEnough(IN struct ADAPTER *prAdapter)
+{
+	return TRUE;
 }
 
 u_int8_t halTxIsDataBufEnough(IN struct ADAPTER *prAdapter, IN struct MSDU_INFO *prMsduInfo)

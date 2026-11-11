@@ -186,8 +186,8 @@ void asicCapInit(IN struct ADAPTER *prAdapter)
 #if defined(_HIF_PCIE) || defined(_HIF_AXI)
 	case MT_DEV_INF_PCIE:
 	case MT_DEV_INF_AXI:
-		prChipInfo->u2TxInitCmdPort = TX_RING_FWDL_IDX_3;
-		prChipInfo->u2TxFwDlPort = TX_RING_FWDL_IDX_3;
+		prChipInfo->u2TxInitCmdPort = TX_RING_FWDL_IDX_4;
+		prChipInfo->u2TxFwDlPort = TX_RING_FWDL_IDX_4;
 		prChipInfo->ucPacketFormat = TXD_PKT_FORMAT_TXD;
 		prChipInfo->u4HifDmaShdlBaseAddr = PCIE_HIF_DMASHDL_BASE;
 
@@ -232,9 +232,7 @@ uint32_t asicGetFwDlInfo(struct ADAPTER *prAdapter,
 
 	prComTailer = &prAdapter->rVerInfo.rCommonTailer;
 
-	kalMemZero(aucBuf, sizeof(aucBuf));
-	kalMemCopy(aucBuf, prComTailer->aucRamVersion,
-			sizeof(prComTailer->aucRamVersion));
+	kalSnprintf(aucBuf, sizeof(aucBuf), "%10s", prComTailer->aucRamVersion);
 	u4Offset += snprintf(pcBuf + u4Offset, i4TotalLen - u4Offset,
 			     "Tailer Ver[%u:%u] %s (%s) info %u:E%u\n",
 			     prComTailer->ucFormatVer,
@@ -483,6 +481,8 @@ void fillTxDescTxByteCountWithCR4(IN struct ADAPTER
 void asicPcieDmaShdlInit(IN struct ADAPTER *prAdapter)
 {
 	uint32_t u4BaseAddr, u4MacVal = 0;
+	uint32_t u4GroupCtrl0 = 0, u4GroupCtrl1 = 0, u4GroupCtrl2 = 0,
+		u4DmashdlQMap0 = 0;
 	struct mt66xx_chip_info *prChipInfo;
 	struct BUS_INFO *prBusInfo;
 	uint32_t u4FreePageCnt = 0;
@@ -520,41 +520,45 @@ void asicPcieDmaShdlInit(IN struct ADAPTER *prAdapter)
 	/* Always use group 1 if we support 2 Data TxRing */
 	if (prBusInfo->tx_ring0_data_idx != prBusInfo->tx_ring1_data_idx) {
 		u4MacVal &=
-	~CONN_HIF_DMASHDL_TOP_REFILL_CONTROL_GROUP1_REFILL_DISABLE_MASK;
+		~CONN_HIF_DMASHDL_TOP_REFILL_CONTROL_GROUP1_REFILL_DISABLE_MASK;
+	}
+	if (prBusInfo->tx_ring2_data_idx) {
+		u4MacVal &=
+		~CONN_HIF_DMASHDL_TOP_REFILL_CONTROL_GROUP2_REFILL_DISABLE_MASK;
 	}
 	HAL_MCR_WR(prAdapter,
 		   CONN_HIF_DMASHDL_REFILL_CONTROL(u4BaseAddr), u4MacVal);
 
-	/* Always use group 1 if we support 2 TxRing for data */
+	HAL_MCR_RD(prAdapter,
+		CONN_HIF_DMASHDL_STATUS_RD(u4BaseAddr), &u4FreePageCnt);
+	u4FreePageCnt = (u4FreePageCnt & DMASHDL_FREE_PG_CNT_MASK)
+		>> DMASHDL_FREE_PG_CNT_OFFSET;
+	u4GroupCtrl0 = DMASHDL_MIN_QUOTA_NUM(0x3);
+	u4GroupCtrl0 |= DMASHDL_MAX_QUOTA_NUM(0xFFF);
 	if (prBusInfo->tx_ring0_data_idx != prBusInfo->tx_ring1_data_idx) {
 		/* HW has no gruantee to switch Quota at runtime */
 		/* Just separate equally. */
-		HAL_MCR_RD(prAdapter,
-			CONN_HIF_DMASHDL_STATUS_RD(u4BaseAddr), &u4FreePageCnt);
-		u4FreePageCnt = (u4FreePageCnt & DMASHDL_FREE_PG_CNT_MASK)
-			>> DMASHDL_FREE_PG_CNT_OFFSET;
-		u4MacVal = DMASHDL_MIN_QUOTA_NUM(0x3);
-		u4MacVal |= DMASHDL_MAX_QUOTA_NUM(0xFFF);
-		HAL_MCR_WR(prAdapter,
-			CONN_HIF_DMASHDL_GROUP0_CTRL(u4BaseAddr), u4MacVal);
-		HAL_MCR_WR(prAdapter,
-			CONN_HIF_DMASHDL_GROUP1_CTRL(u4BaseAddr), u4MacVal);
+		u4GroupCtrl1 = DMASHDL_MIN_QUOTA_NUM(0x3);
+		u4GroupCtrl1 |= DMASHDL_MAX_QUOTA_NUM(0xFFF);
 		/* Wmm1: group 1, others group 0 */
-		HAL_MCR_WR(prAdapter,
-			CONN_HIF_DMASHDL_Q_MAP0(u4BaseAddr), 0x11110000);
-	} else {
-		u4MacVal = DMASHDL_MIN_QUOTA_NUM(0x3);
-		u4MacVal |= DMASHDL_MAX_QUOTA_NUM(0xFFF);
-		HAL_MCR_WR(prAdapter,
-			CONN_HIF_DMASHDL_GROUP0_CTRL(u4BaseAddr), u4MacVal);
-		u4MacVal = 0;
-		HAL_MCR_WR(prAdapter,
-			CONN_HIF_DMASHDL_GROUP1_CTRL(u4BaseAddr), u4MacVal);
+		u4DmashdlQMap0 |= 0x11110000;
 	}
+	if (prBusInfo->tx_ring2_data_idx) {
+		u4GroupCtrl2 = DMASHDL_MIN_QUOTA_NUM(0x3);
+		u4GroupCtrl2 |= DMASHDL_MAX_QUOTA_NUM(0xFFF);
+		u4DmashdlQMap0 &= 0x0FFF0FFF;
+		u4DmashdlQMap0 |= 0x20002000;
+	}
+	HAL_MCR_WR(prAdapter,
+		CONN_HIF_DMASHDL_GROUP0_CTRL(u4BaseAddr), u4GroupCtrl0);
+	HAL_MCR_WR(prAdapter,
+		CONN_HIF_DMASHDL_GROUP1_CTRL(u4BaseAddr), u4GroupCtrl1);
+	HAL_MCR_WR(prAdapter,
+		CONN_HIF_DMASHDL_GROUP2_CTRL(u4BaseAddr), u4GroupCtrl2);
+	HAL_MCR_WR(prAdapter,
+		CONN_HIF_DMASHDL_Q_MAP0(u4BaseAddr), u4DmashdlQMap0);
 
 	u4MacVal = 0;
-	HAL_MCR_WR(prAdapter,
-		   CONN_HIF_DMASHDL_GROUP2_CTRL(u4BaseAddr), u4MacVal);
 	HAL_MCR_WR(prAdapter,
 		   CONN_HIF_DMASHDL_GROUP3_CTRL(u4BaseAddr), u4MacVal);
 	HAL_MCR_WR(prAdapter,
@@ -602,7 +606,6 @@ void asicPdmaLoopBackConfig(struct GLUE_INFO *prGlueInfo, u_int8_t fgEnable)
 	kalDevRegWrite(prGlueInfo, WPDMA_GLO_CFG, GloCfg.word);
 }
 
-#if CFG_MTK_MCIF_WIFI_SUPPORT
 static void configPdmaRxRingThreshold(struct GLUE_INFO *prGlueInfo)
 {
 	uint32_t u4OldVal = 0, u4NewVal = 0;
@@ -627,7 +630,6 @@ static void configPdmaRxRingThreshold(struct GLUE_INFO *prGlueInfo)
 	DBGLOG(HAL, TRACE, "RX_RING[2, 3] TH(0x%x) from 0x%x to 0x%x\n",
 			WPDMA_PAUSE_RX_Q_TH32, u4OldVal, u4NewVal);
 }
-#endif
 
 void asicPdmaIntMaskConfig(struct GLUE_INFO *prGlueInfo,
 		u_int8_t fgEnable)
@@ -645,7 +647,8 @@ void asicPdmaIntMaskConfig(struct GLUE_INFO *prGlueInfo,
 			BIT(prBusInfo->tx_ring_fwdl_idx) |
 			BIT(prBusInfo->tx_ring_cmd_idx) |
 			BIT(prBusInfo->tx_ring0_data_idx) |
-			BIT(prBusInfo->tx_ring1_data_idx);
+			BIT(prBusInfo->tx_ring1_data_idx) |
+			BIT(prBusInfo->tx_ring2_data_idx);
 		IntMask.field_conn.tx_coherent = 0;
 		IntMask.field_conn.rx_coherent = 0;
 		IntMask.field_conn.tx_dly_int = 0;
@@ -703,20 +706,16 @@ void asicPdmaConfig(struct GLUE_INFO *prGlueInfo, u_int8_t fgEnable,
 
 	if (fgEnable) {
 		kalDevRegWrite(prGlueInfo, WPDMA_PAUSE_TX_Q, 0);
-#if CFG_MTK_MCIF_WIFI_SUPPORT
 		configPdmaRxRingThreshold(prGlueInfo);
-#endif
 	} else {
 		halWpdmaWaitIdle(prGlueInfo, 100, 1000);
 		/* Reset DMA Index */
 		kalDevRegWrite(prGlueInfo, WPDMA_RST_PTR, 0xFFFFFFFF);
-#if CFG_MTK_MCIF_WIFI_SUPPORT
 		if (fgResetHif) {
 			halEnableSlpProt(prGlueInfo);
 			halHifRst(prGlueInfo);
 			halDisableSlpProt(prGlueInfo);
 		}
-#endif
 	}
 }
 
@@ -756,6 +755,9 @@ uint32_t asicUpdatTxRingMaxQuota(IN struct ADAPTER *prAdapter,
 		break;
 	case TX_RING_DATA1_IDX_1:
 		u4GroupIdx = 1;
+		break;
+	case TX_RING_DATA2_IDX_2:
+		u4GroupIdx = 2;
 		break;
 	default:
 		return WLAN_STATUS_NOT_ACCEPTED;
@@ -912,10 +914,12 @@ bool asicIsValidRegAccess(IN struct ADAPTER *prAdapter, IN uint32_t u4Register)
 void asicGetMailboxStatus(IN struct ADAPTER *prAdapter,
 			  OUT uint32_t *pu4Val)
 {
+#define WF_MAILBOX_DBG (CONN_HIF_BASE + 0x11C)
+
 	uint32_t u4RegValue = 0;
 
 	HAL_MCR_RD(prAdapter,
-		   CONN_MCU_CONFG_ON_HOST_MAILBOX_WF_ADDR, &u4RegValue);
+		   WF_MAILBOX_DBG, &u4RegValue);
 	*pu4Val = u4RegValue;
 }
 
@@ -1597,6 +1601,9 @@ void asicInitTxdHook(
 		nic_txd_v1_set_hw_amsdu_template;
 	prTxDescOps->nic_txd_change_data_port_by_ac =
 		nic_txd_v1_change_data_port_by_ac;
+	prTxDescOps->u2TxdFrNstsMask = TX_DESC_NSTS_MASK;
+	prTxDescOps->ucTxdFrNstsOffset = TX_DESC_NSTS_OFFSET;
+	prTxDescOps->u2TxdFrStbcMask = TX_DESC_STBC;
 }
 
 void asicInitRxdHook(
@@ -1613,6 +1620,7 @@ void asicInitRxdHook(
 	prRxDescOps->nic_rxd_get_rf_band = nic_rxd_v1_get_rf_band;
 	prRxDescOps->nic_rxd_get_tcl = nic_rxd_v1_get_tcl;
 	prRxDescOps->nic_rxd_get_ofld = nic_rxd_v1_get_ofld;
+	prRxDescOps->nic_rxd_get_HdrTrans = nic_rxd_v1_get_HdrTrans;
 	prRxDescOps->nic_rxd_fill_rfb = nic_rxd_v1_fill_rfb;
 	prRxDescOps->nic_rxd_sanity_check = nic_rxd_v1_sanity_check;
 #if CFG_SUPPORT_WAKEUP_REASON_DEBUG
@@ -1622,8 +1630,7 @@ void asicInitRxdHook(
 }
 
 #if (CFG_SUPPORT_MSP == 1)
-void asicRxProcessRxvforMSP(
-	IN struct ADAPTER *prAdapter,
+void asicRxProcessRxvforMSP(IN struct ADAPTER *prAdapter,
 	IN OUT struct SW_RFB *prRetSwRfb)
 {
 	struct HW_MAC_RX_STS_GROUP_3 *prGroup3;
@@ -1636,6 +1643,7 @@ void asicRxProcessRxvforMSP(
 	}
 	prGroup3 =
 		(struct HW_MAC_RX_STS_GROUP_3 *)prRetSwRfb->prRxStatusGroup3;
+
 	if (prRetSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3)) {
 		prAdapter->arStaRec[
 			prRetSwRfb->ucStaRecIdx].u4RxVector0 =
@@ -1746,101 +1754,38 @@ void asicRxPerfIndProcessRXV(IN struct ADAPTER *prAdapter,
 			       IN struct SW_RFB *prSwRfb,
 			       IN uint8_t ucBssIndex)
 {
-    /* This Feature First MP on Lafite*/
+	/* This Feature First MP on MT6779 */
+	struct GLUE_INFO *prGlueInfo;
 	struct HW_MAC_RX_STS_GROUP_3 *prRxStatusGroup3;
-	uint8_t ucRxRate;
-	uint8_t ucRxMode;
-	uint8_t ucMcs;
-	uint8_t ucFrMode;
-	uint8_t ucShortGI, ucGroupid, ucMu, ucNsts = 1;
 	uint32_t u4PhyRate;
 	uint8_t ucRCPI0 = 0, ucRCPI1 = 0;
-	/* Rate
-	 * Bit Number 2
-	 * Unit 500 Kbps
-	 */
-	uint16_t u2Rate = 0;
+	uint16_t u2Rate = 0; /* Unit 500 Kbps */
+	struct RateInfo rRateInfo = {0};
+	int status;
 
 	ASSERT(prAdapter);
 	ASSERT(prSwRfb);
 
-	if (ucBssIndex >= BSSID_NUM)
+	prGlueInfo = prAdapter->prGlueInfo;
+	status = wlanGetRxRate(prGlueInfo, ucBssIndex, &u4PhyRate, NULL,
+			&rRateInfo);
+	/* ucRate(500kbs) = u4PhyRate(100kbps) */
+	if (status < 0 || u4PhyRate == 0)
 		return;
-
-	/* can't parse radiotap info if no rx vector */
-	if (((prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_2)) == 0)
-		|| ((prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3)) == 0)) {
-		return;
-	}
-
-	prRxStatusGroup3 = prSwRfb->prRxStatusGroup3;
-
-	ucRxMode = (((prRxStatusGroup3)->u4RxVector[0] &
-		RX_VT_RX_MODE_MASK) >> RX_VT_RX_MODE_OFFSET);
-
-	/* RATE & NSS */
-	if ((ucRxMode == RX_VT_LEGACY_CCK)
-		|| (ucRxMode == RX_VT_LEGACY_OFDM)) {
-		/* Bit[2:0] for Legacy CCK, Bit[3:0] for Legacy OFDM */
-		ucRxRate = (HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 0) & RX_VT_RX_RATE_AC_MASK);
-		u2Rate = nicGetHwRateByPhyRate(ucRxRate);
-	} else {
-		ucMcs = (HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 0) & RX_VT_RX_RATE_AC_MASK);
-		ucNsts = ((HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 1) &
-			RX_VT_NSTS_MASK) >> RX_VT_NSTS_OFFSET);
-		ucGroupid = ((HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 1) &
-			RX_VT_GROUP_ID_MASK) >> RX_VT_GROUP_ID_OFFSET);
-
-		if (ucNsts == 0)
-			ucNsts = 1;
-
-		if (ucGroupid && ucGroupid != 63)
-			ucMu = 1;
-		else {
-			ucMu = 0;
-			ucNsts += 1;
-		}
-
-		/* VHTA1 B0-B1 */
-		ucFrMode = ((HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 0) &
-			RX_VT_FR_MODE_MASK) >> RX_VT_FR_MODE_OFFSET);
-		ucShortGI = (HAL_RX_VECTOR_GET_RX_VECTOR(
-			prRxStatusGroup3, 0) &
-			RX_VT_SHORT_GI) ? 1 : 0;	/* VHTA2 B0 */
-
-		if ((ucMcs > PHY_RATE_MCS9) ||
-			(ucFrMode > RX_VT_FR_MODE_160) ||
-			(ucShortGI > MAC_GI_SHORT))
-			return;
-
-		/* ucRate(500kbs) = u4PhyRate(100kbps) */
-		u4PhyRate = nicGetPhyRateByMcsRate(ucMcs, ucFrMode,
-					ucShortGI);
-		u2Rate = u4PhyRate / 5;
-
-	}
+	u2Rate = u4PhyRate / 5;
 
 	/* RCPI */
+	prRxStatusGroup3 = prSwRfb->prRxStatusGroup3;
 	ucRCPI0 = HAL_RX_STATUS_GET_RCPI0(prRxStatusGroup3);
 	ucRCPI1 = HAL_RX_STATUS_GET_RCPI1(prRxStatusGroup3);
 
-
 	/* Record peak rate to Traffic Indicator*/
-	if (u2Rate > prAdapter->prGlueInfo
-		->PerfIndCache.u2CurRxRate[ucBssIndex]) {
-		prAdapter->prGlueInfo->PerfIndCache.
-			u2CurRxRate[ucBssIndex] = u2Rate;
-		prAdapter->prGlueInfo->PerfIndCache.
-			ucCurRxNss[ucBssIndex] = ucNsts;
-		prAdapter->prGlueInfo->PerfIndCache.
-			ucCurRxRCPI0[ucBssIndex] = ucRCPI0;
-		prAdapter->prGlueInfo->PerfIndCache.
-			ucCurRxRCPI1[ucBssIndex] = ucRCPI1;
+	if (u2Rate > prGlueInfo->PerfIndCache.u2CurRxRate[ucBssIndex]) {
+		prGlueInfo->PerfIndCache.u2CurRxRate[ucBssIndex] = u2Rate;
+		prGlueInfo->PerfIndCache.ucCurRxNss[ucBssIndex] =
+								rRateInfo.u4Nss;
+		prGlueInfo->PerfIndCache.ucCurRxRCPI0[ucBssIndex] = ucRCPI0;
+		prGlueInfo->PerfIndCache.ucCurRxRCPI1[ucBssIndex] = ucRCPI1;
 	}
 }
 #endif

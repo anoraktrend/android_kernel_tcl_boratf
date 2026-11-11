@@ -19,8 +19,6 @@
 #include "wmt_step.h"
 #include "wmt_lib.h"
 #include <linux/ratelimit.h>
-#include <linux/slab.h>
-#include <linux/vmalloc.h>
 
 #define STP_DBG_PAGED_TRACE_SIZE (2048*sizeof(char))
 #define SUB_PKT_SIZE 1024
@@ -33,6 +31,9 @@
 #define ROM_V4_PATCH "ROMv4"
 
 ENUM_STP_FW_ISSUE_TYPE issue_type;
+UINT8 g_paged_trace_buffer[STP_DBG_PAGED_TRACE_SIZE] = { 0 };
+UINT32 g_paged_trace_len;
+UINT8 g_paged_dump_buffer[STP_DBG_PAGED_DUMP_BUFFER_SIZE] = { 0 };
 UINT32 g_paged_dump_len;
 
 static PUINT8 soc_task_str[STP_DBG_TASK_ID_MAX] = {
@@ -131,15 +132,11 @@ static _osal_inline_ VOID stp_dbg_soc_emi_dump_buffer(UINT8 *buffer, UINT32 len)
 
 static _osal_inline_ INT32 stp_dbg_soc_put_emi_dump_to_nl(PUINT8 data_buf, INT32 dump_len)
 {
-	UINT8 *tmp;
+	static UINT8  tmp[SUB_PKT_SIZE + NL_PKT_HEADER_LEN];
 	INT32 remain = dump_len, index = 0;
 	INT32 ret = 0;
 	INT32 len;
 	INT32 offset = 0;
-
-	tmp = kmalloc(SUB_PKT_SIZE + NL_PKT_HEADER_LEN, GFP_KERNEL);
-	if (!tmp)
-		return -ENOMEM;
 
 	if (dump_len > 0) {
 		index = 0;
@@ -170,7 +167,6 @@ static _osal_inline_ INT32 stp_dbg_soc_put_emi_dump_to_nl(PUINT8 data_buf, INT32
 	} else
 		STP_DBG_PR_INFO("dump entry length is 0\n");
 
-	kfree(tmp);
 	return ret;
 }
 
@@ -185,7 +181,6 @@ static _osal_inline_ UINT64 stp_dbg_soc_elapsed_time(UINT64 ts, ULONG nsec)
 
 static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 {
-	UINT8 *paged_dump_buffer;
 	INT32 ret = 0;
 	UINT32 counter = 0;
 	UINT32 dump_num = 0;
@@ -219,10 +214,6 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 
 	if (dump_sink == 0)
 		return 0;
-
-	paged_dump_buffer = vzalloc(STP_DBG_PAGED_DUMP_BUFFER_SIZE);
-	if (!paged_dump_buffer)
-		return -ENOMEM;
 
 	/* handshake error handle: notify FW assert in abnormal case */
 	if (p_ecsi->p_ecso->emi_apmem_ctrl_state == 0x0) {
@@ -273,6 +264,7 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 				break;
 			}
 			STP_DBG_PR_DBG("waiting chip put done, chip_state: %d\n", chip_state);
+/* WMT_DBG_SUPPORT is 1 if not user load */
 #if WMT_DBG_SUPPORT
 			if (chip_state == 0 && __ratelimit(&_rs))
 				stp_dbg_poll_cpupcr(5, 1, 1);
@@ -313,21 +305,15 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 		/* dump_len should not be negative */
 		if (dump_len < 0)
 			dump_len = 0;
-		if (dump_len > STP_DBG_PAGED_DUMP_BUFFER_SIZE) {
-			STP_DBG_PR_ERR("dump len is over than 32K(%d)\n",
-					dump_len);
-			ret = -EOVERFLOW;
-			abort = 1;
-			goto paged_dump_end;
-		}
 
 		/*move dump info according to dump_addr & dump_len */
-		osal_memcpy_fromio(paged_dump_buffer, dump_vir_addr, dump_len);
+		osal_memcpy_fromio(&g_paged_dump_buffer[0], dump_vir_addr, dump_len);
 
-		STP_DBG_PR_DBG("coredump mode: %d!\n", dump_sink);
-		switch (dump_sink) {
+		if (dump_len <= 32 * 1024) {
+			STP_DBG_PR_DBG("coredump mode: %d!\n", dump_sink);
+			switch (dump_sink) {
 			case 1:
-				ret = stp_dbg_aee_send(paged_dump_buffer, dump_len, 0);
+				ret = stp_dbg_aee_send(&g_paged_dump_buffer[0], dump_len, 0);
 				if (ret == 0)
 					STP_DBG_PR_DBG("aee send ok!\n");
 				else if (ret == 1)
@@ -340,7 +326,7 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 					STP_DBG_PR_ERR("aee send error!\n");
 				break;
 			case 2:
-				ret = stp_dbg_soc_put_emi_dump_to_nl(paged_dump_buffer, dump_len);
+				ret = stp_dbg_soc_put_emi_dump_to_nl(&g_paged_dump_buffer[0], dump_len);
 				if (ret == 0)
 					STP_DBG_PR_DBG("dump send ok!\n");
 				else if (ret == 1) {
@@ -352,10 +338,10 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 				break;
 			default:
 				STP_DBG_PR_ERR("unknown sink %d\n", dump_sink);
-				ret = -1;
-				abort = 1;
-				goto paged_dump_end;
-		}
+				return -1;
+			}
+		} else
+			STP_DBG_PR_ERR("dump len is over than 32K(%d)\n", dump_len);
 
 		g_paged_dump_len += dump_len;
 		wmt_plat_update_host_sync_num();
@@ -368,8 +354,7 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_dump(INT32 dump_sink)
 		STP_DBG_PR_DBG("++ paged dump counter(%d) ++\n", page_counter);
 		/* dump 1st 512 bytes data to kernel log for fw requirement */
 		if (page_counter == 1)
-			stp_dbg_dump_log(paged_dump_buffer,
-					 dump_len < 512 ? dump_len : 512);
+			stp_dbg_dump_log(&g_paged_dump_buffer[0], dump_len < 512 ? dump_len : 512);
 
 		osal_get_local_time(&start_ts, &start_nsec);
 		while (1) {
@@ -420,19 +405,16 @@ paged_dump_end:
 				stp_dbg_nl_send_data(FAKECOREDUMPEND, osal_sizeof(FAKECOREDUMPEND));
 			stp_dbg_set_coredump_timer_state(CORE_DUMP_TIMEOUT);
 			stp_dbg_poll_cpupcr(5, 5, 0);
-			stp_dbg_poll_dmaregs(5, 1);
 			ret = -1;
 			break;
 		}
 	} while (1);
 
-	vfree(paged_dump_buffer);
 	return ret;
 }
 
 static _osal_inline_ INT32 stp_dbg_soc_paged_trace(VOID)
 {
-	UINT8 *trace_buf;
 	INT32 ret = 0;
 	UINT32 ctrl_val = 0;
 	UINT32 loop_cnt1 = 0;
@@ -447,9 +429,6 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_trace(VOID)
 		STP_DBG_PR_ERR("get EMI info failed.\n");
 		return -1;
 	}
-	trace_buf = kmalloc(STP_DBG_PAGED_TRACE_SIZE, GFP_KERNEL);
-	if (!trace_buf)
-		return -ENOMEM;
 
 	do {
 		ctrl_val = 0;
@@ -473,6 +452,7 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_trace(VOID)
 
 		buffer_start = wmt_plat_get_dump_info(p_ecsi->p_ecso->emi_apmem_ctrl_chip_print_buff_start);
 		buffer_idx = wmt_plat_get_dump_info(p_ecsi->p_ecso->emi_apmem_ctrl_chip_print_buff_idx);
+		g_paged_trace_len = buffer_idx;
 		STP_DBG_PR_INFO("paged trace buffer addr(%08x),buffer_len(%d)\n", buffer_start,
 				buffer_idx);
 		dump_vir_addr = wmt_plat_get_emi_virt_add(buffer_start - p_ecsi->emi_phy_addr);
@@ -481,18 +461,17 @@ static _osal_inline_ INT32 stp_dbg_soc_paged_trace(VOID)
 			ret = -2;
 			break;
 		}
-		osal_memcpy_fromio(trace_buf, dump_vir_addr,
+		osal_memcpy_fromio(&g_paged_trace_buffer[0], dump_vir_addr,
 				buffer_idx < STP_DBG_PAGED_TRACE_SIZE ? buffer_idx : STP_DBG_PAGED_TRACE_SIZE);
 		/*moving paged trace according to buffer_start & buffer_len */
 
 		dump_len =
 			buffer_idx < STP_DBG_PAGED_TRACE_SIZE ? buffer_idx : STP_DBG_PAGED_TRACE_SIZE;
 		pr_info("-- paged trace ascii output --");
-		stp_dbg_dump_log(trace_buf, dump_len);
+		stp_dbg_dump_log(&g_paged_trace_buffer[0], dump_len);
 		ret = 0;
 	} while (0);
 
-	kfree(trace_buf);
 	return ret;
 }
 
@@ -556,44 +535,12 @@ PUINT8 stp_dbg_soc_id_to_task(UINT32 id)
 	return soc_task_str[temp_id];
 }
 
-UINT32 stp_dbg_soc_read_debug_crs(ENUM_CONNSYS_DEBUG_CR cr)
+INT32 stp_dbg_soc_poll_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd)
 {
-#define CONSYS_REG_READ(addr) (*((volatile UINT32 *)(addr)))
-#ifdef CONFIG_OF		/*use DT */
-	P_CONSYS_EMI_ADDR_INFO emi_phy_addr;
-	UINT32 chip_id = 0;
+	if (times > WMT_CORE_DMP_CPUPCR_NUM)
+		times = WMT_CORE_DMP_CPUPCR_NUM;
 
-	chip_id = wmt_plat_get_soc_chipid();
-	emi_phy_addr = mtk_wcn_consys_soc_get_emi_phy_add();
-
-	if (cr == CONNSYS_EMI_REMAP) {
-		if (emi_phy_addr != NULL && emi_phy_addr->emi_remap_offset)
-			return CONSYS_REG_READ(conn_reg.topckgen_base +
-					emi_phy_addr->emi_remap_offset);
-		else
-			STP_DBG_PR_INFO("EMI remap has no value\n");
-	}
-
-	if (chip_id == 0x6765 || chip_id == 0x3967 || chip_id == 0x6761
-			|| chip_id == 0x6779 || chip_id == 0x6768 || chip_id == 0x6785
-			|| chip_id == 0x6873 || chip_id == 0x8168 || chip_id == 0x6853
-			|| chip_id == 0x6833)
-		return 0;
-
-	if (conn_reg.mcu_base) {
-		switch (cr) {
-		case CONNSYS_CPU_CLK:
-			return CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_CPU_CLK_STATUS_OFFSET);
-		case CONNSYS_BUS_CLK:
-			return CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_BUS_CLK_STATUS_OFFSET);
-		case CONNSYS_DEBUG_CR1:
-			return CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_DBG_CR1_OFFSET);
-		case CONNSYS_DEBUG_CR2:
-			return CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_DBG_CR2_OFFSET);
-		default:
-			return 0;
-		}
-	}
-#endif
-	return -1;
+	if (wmt_lib_dump_cpupcr(times, sleep) == MTK_WCN_BOOL_FALSE)
+		pr_info("dump_cpupcr fail");
+	return 0;
 }

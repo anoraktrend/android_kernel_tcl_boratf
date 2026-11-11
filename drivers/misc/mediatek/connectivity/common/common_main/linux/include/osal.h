@@ -22,8 +22,6 @@
 
 #include "osal_typedef.h"
 #include "../../debug_utility/ring.h"
-#include <linux/io.h>
-#include <linux/string.h>
 #include <linux/workqueue.h>
 /*******************************************************************************
 *                         C O M P I L E R   F L A G S
@@ -46,7 +44,7 @@
 
 
 #if (defined(CONFIG_MTK_GMO_RAM_OPTIMIZE) && !defined(CONFIG_MTK_ENG_BUILD))
-#define OSAL_OP_DATA_SIZE   8
+#define OSAL_OP_DATA_SIZE   16
 #else
 #define OSAL_OP_DATA_SIZE   32
 #endif
@@ -322,27 +320,6 @@ VOID osal_memcpy_fromio(PVOID dst, const PVOID src, UINT32 len);
 VOID osal_memcpy_toio(PVOID dst, const PVOID src, UINT32 len);
 INT32 osal_memcmp(const PVOID buf1, const PVOID buf2, UINT32 len);
 
-#ifndef OSAL_KEEP_COMPAT_FUNCTIONS
-#define osal_strlen(str) strlen(str)
-#define osal_strcmp(dst, src) strcmp(dst, src)
-#define osal_strncmp(dst, src, len) strncmp(dst, src, len)
-#define osal_strcpy(dst, src) strcpy(dst, src)
-#define osal_strncpy(dst, src, len) strncpy(dst, src, len)
-#define osal_strcat(dst, src) strcat(dst, src)
-#define osal_strncat(dst, src, len) strncat(dst, src, len)
-#define osal_strchr(str, c) strchr(str, c)
-#define osal_strsep(str, c) strsep(str, c)
-#define osal_strstr(str1, str2) strstr(str1, str2)
-#define osal_strnstr(str1, str2, n) strnstr(str1, str2, n)
-#define osal_snprintf(buf, len, fmt, ...) snprintf(buf, len, fmt, ##__VA_ARGS__)
-#define osal_sprintf(str, fmt, ...) snprintf(str, DBG_LOG_STR_SIZE, fmt, ##__VA_ARGS__)
-#define osal_memset(buf, i, len) memset(buf, i, len)
-#define osal_memcpy(dst, src, len) memcpy(dst, src, len)
-#define osal_memcpy_fromio(dst, src, len) memcpy_fromio(dst, src, len)
-#define osal_memcpy_toio(dst, src, len) memcpy_toio(dst, src, len)
-#define osal_memcmp(buf1, buf2, len) memcmp(buf1, buf2, len)
-#endif
-
 UINT16 osal_crc16(const PUINT8 buffer, const UINT32 length);
 VOID osal_thread_show_stack(P_OSAL_THREAD pThread);
 
@@ -427,7 +404,7 @@ INT32 osal_test_and_clear_bit(UINT32 bitOffset, P_OSAL_BIT_OP_VAR pData);
 INT32 osal_test_and_set_bit(UINT32 bitOffset, P_OSAL_BIT_OP_VAR pData);
 
 INT32 osal_gettimeofday(PINT32 sec, PINT32 usec);
-void osal_do_gettimeofday(struct timeval *tv);
+void osal_do_gettimeofday(struct timespec64 *tv);
 INT32 osal_printtimeofday(const PUINT8 prefix);
 VOID osal_get_local_time(PUINT64 sec, PULONG nsec);
 UINT64 osal_elapsed_us(UINT64 ts, ULONG usec);

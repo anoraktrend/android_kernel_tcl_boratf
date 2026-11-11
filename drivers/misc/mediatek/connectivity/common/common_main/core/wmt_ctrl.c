@@ -42,7 +42,6 @@
 #include "stp_core.h"
 #include "stp_dbg.h"
 #include "wmt_ic.h"
-#include "wmt_step.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -75,8 +74,10 @@ static INT32 wmt_ctrl_stp_conf(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_free_patch(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_get_patch(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_host_baudrate_set(P_WMT_CTRL_DATA);
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 static INT32 wmt_ctrl_sdio_hw(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_sdio_func(P_WMT_CTRL_DATA);
+#endif
 static INT32 wmt_ctrl_hwidver_set(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_stp_rst(P_WMT_CTRL_DATA);
 static INT32 wmt_ctrl_get_wmt_conf(P_WMT_CTRL_DATA);
@@ -134,8 +135,10 @@ static const WMT_CTRL_FUNC wmt_ctrl_func[] = {
 	[WMT_CTRL_GET_PATCH] = wmt_ctrl_get_patch,
 	[WMT_CTRL_GET_PATCH_NAME] = wmt_ctrl_get_patch_name,
 	[WMT_CTRL_HOST_BAUDRATE_SET] = wmt_ctrl_host_baudrate_set,
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	[WMT_CTRL_SDIO_HW] = wmt_ctrl_sdio_hw,
 	[WMT_CTRL_SDIO_FUNC] = wmt_ctrl_sdio_func,
+#endif
 	[WMT_CTRL_HWIDVER_SET] = wmt_ctrl_hwidver_set,
 	[WMT_CTRL_HWVER_GET] = NULL,	/* TODO: [FixMe][GeorgeKuo]: remove unused function. */
 	[WMT_CTRL_STP_RST] = wmt_ctrl_stp_rst,
@@ -169,10 +172,6 @@ static const WMT_CTRL_FUNC wmt_ctrl_func[] = {
 *                              F U N C T I O N S
 ********************************************************************************
 */
-INT32 __weak mtk_wcn_consys_stp_btif_parser_wmt_evt(const PUINT8 str, UINT32 len)
-{
-	return 0;
-}
 
 INT32 wmt_ctrl(P_WMT_CTRL_DATA pWmtCtrlData)
 {
@@ -239,6 +238,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	INT32 extended = 0;
 	P_OSAL_THREAD p_rx_thread = NULL;
 	OSAL_THREAD_SCHEDSTATS schedstats;
+	u64 start_time;
 
 	if (readSize)
 		*readSize = 0;
@@ -264,6 +264,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	p_rx_thread = mtk_stp_rx_thread_get();
 	osal_thread_sched_mark(p_rx_thread, &schedstats);
 
+	start_time = jiffies;
+
 	while (readLen == 0 && leftCnt > 0) {	/* got nothing, wait for STP's signal */
 		/* if assert happen, do not wait for any signal again */
 		if (mtk_wcn_stp_get_wmt_trg_assert() == 1
@@ -273,9 +275,17 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq);
 		if (waitRet == 0) {
 			leftCnt--;
+
+			WMT_INFO_FUNC("RX waiting [%u] ms ===========", jiffies_to_msecs(jiffies - start_time));
 			/* dump btif_rxd's backtrace to check whether it is blocked or not */
 			osal_dump_thread_state("btif_rxd");
-			stp_dbg_poll_cpupcr(5, 1, 1);
+			if (!mtk_wcn_stp_is_sdio_mode())
+				mtk_wcn_consys_poll_cpucpr_dump(5, 1);
+			else
+				stp_dbg_poll_cpupcr(5, 1, 1);
+			if ((leftCnt == loopCnt - 1) && !mtk_wcn_stp_is_sdio_mode())
+				mtk_wcn_consys_pc_log_dump();
+
 			if (!mtk_wcn_stp_is_sdio_mode())
 				mtk_wcn_consys_stp_btif_logger_ctrl(BTIF_DUMP_BTIF_IRQ);
 
@@ -305,21 +315,26 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 
 				osal_thread_sched_unmark(p_rx_thread, &schedstats);
 				wmt_ctrl_show_sched_stats_log(p_rx_thread, &schedstats);
-				stp_dbg_poll_cpupcr(5, 1, 1);
+
+				if (!mtk_wcn_stp_is_sdio_mode())
+					mtk_wcn_consys_poll_cpucpr_dump(5, 1);
+				else
+					stp_dbg_poll_cpupcr(5, 1, 1);
 				WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
 					     jiffies, pDev->rWmtRxWq.timeoutValue);
-				WMT_STEP_COMMAND_TIMEOUT_DO_ACTIONS_FUNC("STP RX timeout");
+				wmt_lib_cmd_rx_timeout_dump();
 
 				/* Reason number 44 means that stp data path still has data,
 				 * possibly a driver problem
 				 */
+				pr_info("stpRxState=[%d]", stpRxState);
 				if (stpRxState != 0)
 					wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 44);
 				return -1;
 			}
 		} else if (waitRet < 0) {
 			WMT_WARN_FUNC("wmt_dev_rx_timeout: interrupted by signal (%d)\n", waitRet);
-			WMT_STEP_COMMAND_TIMEOUT_DO_ACTIONS_FUNC("STP RX timeout");
+			wmt_lib_cmd_rx_timeout_dump();
 			return waitRet;
 		}
 		readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
@@ -490,6 +505,7 @@ INT32 wmt_ctrl_stp_close(P_WMT_CTRL_DATA pWmtCtrlData)
 {
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 iRet = 0;
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	UINT8 cmdStr[NAME_MAX + 1] = { 0 };
 	/* un-register to STP-core for rx */
 
@@ -509,6 +525,7 @@ INT32 wmt_ctrl_stp_close(P_WMT_CTRL_DATA pWmtCtrlData)
 			return -2;
 		}
 	}
+#endif
 	if (pDev->rWmtHifConf.hifType == WMT_HIF_BTIF) {
 		/*un-register rxcb to btif */
 		iRet = mtk_wcn_stp_rxcb_register(NULL);
@@ -533,6 +550,7 @@ INT32 wmt_ctrl_stp_open(P_WMT_CTRL_DATA pWmtCtrlData)
 {
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 iRet;
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	UINT8 cmdStr[NAME_MAX + 1] = { 0 };
 
 	if (pDev->rWmtHifConf.hifType == WMT_HIF_UART) {
@@ -543,6 +561,7 @@ INT32 wmt_ctrl_stp_open(P_WMT_CTRL_DATA pWmtCtrlData)
 			return -1;
 		}
 	}
+#endif
 	if (pDev->rWmtHifConf.hifType == WMT_HIF_BTIF) {
 		iRet = mtk_wcn_stp_open_btif();
 		if (iRet) {
@@ -954,6 +973,7 @@ INT32 wmt_ctrl_host_baudrate_set(P_WMT_CTRL_DATA pWmtCtrlData)
 	return iRet;
 }
 
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 INT32 wmt_ctrl_sdio_hw(P_WMT_CTRL_DATA pWmtCtrlData)
 {
 	INT32 iRet = 0;
@@ -974,7 +994,7 @@ INT32 wmt_ctrl_sdio_hw(P_WMT_CTRL_DATA pWmtCtrlData)
 	if (sdioSlotNum == WMT_SDIO_SLOT_SDIO2)
 		statBit = WMT_STAT_SDIO2_ON;
 
-	if (funcState) {
+	if (funcState != FUNC_ON) {
 		if (osal_test_and_set_bit(statBit, &pDev->state)) {
 			WMT_WARN_FUNC("CTRL_SDIO_SLOT slotNum(%d) already ON\n", sdioSlotNum);
 			/* still return 0 */
@@ -1059,6 +1079,7 @@ INT32 wmt_ctrl_sdio_func(P_WMT_CTRL_DATA pWmtCtrlData)
 
 	return iRet;
 }
+#endif
 
 #if 0
 /* TODO: [FixMe][GeorgeKuo]: remove unused function. get hwver from core is not needed. */
@@ -1166,7 +1187,6 @@ INT32 wmt_ctrl_set_stp_dbg_info(P_WMT_CTRL_DATA pWmtCtrlData)
 static INT32 wmt_ctrl_trg_assert(P_WMT_CTRL_DATA pWmtCtrlData)
 {
 	INT32 iRet = -1;
-
 	ENUM_WMTDRV_TYPE_T drv_type;
 	UINT32 reason = 0;
 	PUINT8 keyword;

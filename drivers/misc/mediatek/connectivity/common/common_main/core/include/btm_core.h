@@ -35,11 +35,7 @@
 #define STP_BTM_OPERATION_FAIL    (-1)
 #define STP_BTM_OPERATION_SUCCESS (0)
 
-#ifdef CONFIG_MTK_ENABLE_GMO
-#define STP_BTM_OP_BUF_SIZE (32)
-#else
 #define STP_BTM_OP_BUF_SIZE (64)
-#endif
 
 #define BTM_THREAD_NAME "mtk_stp_btm"
 #define STP_PAGED_DUMP_TIME_LIMIT 3500
@@ -93,7 +89,7 @@ typedef struct mtk_stp_btm {
 	P_OSAL_OP pCurOP;	/* current op */
 	INT32 gDumplogflag;
 
-	/*wmt_notify */
+	/* wmt_notify */
 	INT32 (*wmt_notify)(MTKSTP_BTM_WMT_OP_T);
 
 	OSAL_TIMER trigger_assert_timer;
@@ -126,9 +122,7 @@ INT32 stp_btm_notify_wmt_dmp_wq(MTKSTP_BTM_T *stp_btm);
 INT32 stp_btm_notify_emi_dump_end(MTKSTP_BTM_T *stp_btm);
 INT32 stp_btm_deinit(MTKSTP_BTM_T *stp_btm);
 INT32 stp_btm_reset_btm_wq(MTKSTP_BTM_T *stp_btm);
-INT32 stp_notify_btm_poll_cpupcr(MTKSTP_BTM_T *stp_btm, UINT32 times, UINT32 sleep);
-INT32 stp_notify_btm_poll_cpupcr_ctrl(UINT32 en);
-INT32 stp_btm_sort_btm_wq(MTKSTP_BTM_T *stp_btm);
+
 INT32 stp_notify_btm_dump(MTKSTP_BTM_T *stp_btm);
 INT32 stp_notify_btm_do_fw_assert(MTKSTP_BTM_T *stp_btm);
 INT32 stp_notify_btm_handle_wmt_lte_coex(MTKSTP_BTM_T *stp_btm);

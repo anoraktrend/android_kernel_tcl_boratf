@@ -87,9 +87,7 @@
 #include "precomp.h"
 #include "gl_vendor.h"
 #include "gl_cfg80211.h"
-#if CFG_MTK_MCIF_WIFI_SUPPORT
 #include "mddp.h"
-#endif
 /******************************************************************************
  *                              C O N S T A N T S
  ******************************************************************************
@@ -122,7 +120,7 @@
  */
 
 struct net_device *g_P2pPrDev;
-struct wireless_dev *gprP2pWdev;
+struct wireless_dev *gprP2pWdev[KAL_P2P_NUM];
 struct wireless_dev *gprP2pRoleWdev[KAL_P2P_NUM];
 struct net_device *gPrP2pDev[KAL_P2P_NUM];
 uint32_t g_u4DevIdx[KAL_P2P_NUM];
@@ -221,6 +219,17 @@ static const struct wiphy_vendor_command mtk_p2p_vendor_ops[] = {
 				| WIPHY_VENDOR_CMD_NEED_NETDEV
 				| WIPHY_VENDOR_CMD_NEED_RUNNING,
 		.doit = mtk_cfg80211_vendor_acs
+	},
+#endif
+#if CFG_SUPPORT_DFS_MASTER
+	{
+		{
+			.vendor_id = OUI_QCA,
+			.subcmd = NL80211_VENDOR_SUBCMD_DFS_CAPABILITY
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
+				| WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = mtk_cfg80211_vendor_dfs_capability
 	},
 #endif
 	{
@@ -893,18 +902,22 @@ u_int8_t p2pNetRegister(struct GLUE_INFO *prGlueInfo,
 {
 	u_int8_t fgDoRegister = FALSE;
 	u_int8_t fgRollbackRtnlLock = FALSE;
-	u_int8_t ret;
+	struct net_device *prDevHandler = NULL;
+	struct ADAPTER *prAdapter = NULL;
+	u_int8_t ret = FALSE;
+	uint32_t i;
 
 	GLUE_SPIN_LOCK_DECLARATION();
 
+	prAdapter = prGlueInfo->prAdapter;
+
 	ASSERT(prGlueInfo);
-	ASSERT(prGlueInfo->prAdapter);
+	ASSERT(prAdapter);
 
 	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
-	if (prGlueInfo->prAdapter->rP2PNetRegState
-		== ENUM_NET_REG_STATE_UNREGISTERED) {
-		prGlueInfo->prAdapter->rP2PNetRegState =
-			ENUM_NET_REG_STATE_REGISTERING;
+	if (prAdapter->rP2PNetRegState == ENUM_NET_REG_STATE_UNREGISTERED &&
+		prAdapter->rP2PRegState == ENUM_P2P_REG_STATE_REGISTERED) {
+		prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_REGISTERING;
 		fgDoRegister = TRUE;
 	}
 	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
@@ -914,69 +927,64 @@ u_int8_t p2pNetRegister(struct GLUE_INFO *prGlueInfo,
 
 	if (fgIsRtnlLockAcquired && rtnl_is_locked()) {
 		fgRollbackRtnlLock = TRUE;
-		rtnl_unlock();
 	}
 
-	/* net device initialize */
-	netif_carrier_off(prGlueInfo->prP2PInfo[0]->prDevHandler);
-	netif_tx_stop_all_queues(prGlueInfo->prP2PInfo[0]->prDevHandler);
+	for (i = 0; i < prGlueInfo->prAdapter->prP2pInfo->u4DeviceNum; i++) {
+		GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+		prDevHandler = prGlueInfo->prP2PInfo[i] ?
+			prGlueInfo->prP2PInfo[i]->prDevHandler :
+			NULL;
 
-	/* register for net device */
-	if (g_u4DevIdx[0]) {
-		prGlueInfo->prP2PInfo[0]->prDevHandler->ifindex =
-		g_u4DevIdx[0];
-		g_u4DevIdx[0] = 0;
-	}
-
-	if (register_netdev(prGlueInfo->prP2PInfo[0]->prDevHandler) < 0) {
-		DBGLOG(INIT, WARN, "unable to register netdevice for p2p\n");
-		/* free dev in glUnregisterP2P() */
-		/* free_netdev(prGlueInfo->prP2PInfo[0]->prDevHandler); */
-		ret = FALSE;
-	} else {
-		prGlueInfo->prAdapter->rP2PNetRegState =
-			ENUM_NET_REG_STATE_REGISTERED;
-		gPrP2pDev[0] = prGlueInfo->prP2PInfo[0]->prDevHandler;
-		ret = TRUE;
-	}
-
-	if (prGlueInfo->prAdapter->prP2pInfo->u4DeviceNum == KAL_P2P_NUM) {
-		/* net device initialize */
-		netif_carrier_off(prGlueInfo->prP2PInfo[1]->prDevHandler);
-		netif_tx_stop_all_queues(
-			prGlueInfo->prP2PInfo[1]->prDevHandler);
-
-		if (g_u4DevIdx[1]) {
-			prGlueInfo->prP2PInfo[1]->prDevHandler->ifindex
-			= g_u4DevIdx[1];
-			g_u4DevIdx[1] = 0;
+		/* Check NETREG_RELEASED for the case that free_netdev
+		 * is called but not set to NULL yet.
+		 */
+		if (prDevHandler == NULL ||
+			prDevHandler->reg_state == NETREG_RELEASED) {
+			prAdapter->rP2PNetRegState =
+				ENUM_NET_REG_STATE_UNREGISTERED;
+			GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+			ret = FALSE;
+			goto fail;
 		}
 
-		/* register for net device */
-		if (register_netdev(
-			prGlueInfo->prP2PInfo[1]->prDevHandler) < 0) {
+		/* net device initialize */
+		netif_carrier_off(prDevHandler);
+		netif_tx_stop_all_queues(prDevHandler);
 
+		if (g_u4DevIdx[i]) {
+			prDevHandler->ifindex = g_u4DevIdx[i];
+			g_u4DevIdx[i] = 0;
+		}
+		GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+
+		if (fgRollbackRtnlLock)
+			rtnl_unlock();
+
+		/* register for net device */
+		if (register_netdev(prDevHandler) < 0) {
 			DBGLOG(INIT, WARN,
 				"unable to register netdevice for p2p\n");
 			/* free dev in glUnregisterP2P() */
-			/* free_netdev(prP2PInfo[1]->prDevHandler); */
-
+			/* free_netdev(prGlueInfo->prP2PInfo->prDevHandler); */
 			ret = FALSE;
 		} else {
-			prGlueInfo->prAdapter->rP2PNetRegState =
-				ENUM_NET_REG_STATE_REGISTERED;
-			gPrP2pDev[1] = prGlueInfo->prP2PInfo[1]->prDevHandler;
+			GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+			gPrP2pDev[i] = prDevHandler;
+			GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 			ret = TRUE;
 		}
 
+		if (fgRollbackRtnlLock)
+			rtnl_lock();
 
-		DBGLOG(P2P, INFO, "P2P 2nd interface work %d %d\n",
-			prGlueInfo->prP2PInfo[0]->prDevHandler->ifindex,
-			prGlueInfo->prP2PInfo[1]->prDevHandler->ifindex);
+		DBGLOG(P2P, INFO, "P2P interface %d work %d\n",
+			i, prDevHandler->ifindex);
 	}
-	if (fgRollbackRtnlLock)
-		rtnl_lock();
 
+	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+	prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_REGISTERED;
+	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+fail:
 	return ret;
 }
 
@@ -1001,7 +1009,8 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 	ASSERT(prAdapter);
 
 	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
-	if (prAdapter->rP2PNetRegState == ENUM_NET_REG_STATE_REGISTERED) {
+	if (prAdapter->rP2PNetRegState == ENUM_NET_REG_STATE_REGISTERED &&
+		prAdapter->rP2PRegState == ENUM_P2P_REG_STATE_REGISTERED) {
 		prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_UNREGISTERING;
 		fgDoUnregister = TRUE;
 	}
@@ -1043,6 +1052,10 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 				MEDIA_STATE_CONNECTED) &&
 			    ((iftype == NL80211_IFTYPE_P2P_CLIENT) ||
 			     (iftype == NL80211_IFTYPE_STATION))) {
+				p2pChangeMediaState(prAdapter,
+					prP2pBssInfo,
+					MEDIA_STATE_DISCONNECTED);
+
 #if CFG_WPS_DISCONNECT || (KERNEL_VERSION(4, 2, 0) <= CFG80211_VERSION_CODE)
 				cfg80211_disconnected(prRoleDev, 0, NULL, 0,
 							TRUE, GFP_KERNEL);
@@ -1087,8 +1100,9 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 			rtnl_lock();
 	}
 
-	prGlueInfo->prAdapter->rP2PNetRegState =
-		ENUM_NET_REG_STATE_UNREGISTERED;
+	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+	prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_UNREGISTERED;
+	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
 	return TRUE;
 }
@@ -1161,6 +1175,11 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 
 #endif /* CFG_ENABLE_WIFI_DIRECT_CFG_80211 */
 
+#if (CFG_SUPPORT_WIFI_6G == 1)
+	if (!prAdapter->fgIsHwSupport6G)
+		prP2pWdev->wiphy->bands[BAND_6G] = NULL;
+#endif
+
 	/* setup netdev */
 	/* Point to shared glue structure */
 	prNetDevPriv = (struct NETDEV_PRIVATE_GLUE_INFO *)
@@ -1173,7 +1192,7 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 #if CFG_ENABLE_UNIFY_WIPHY
 		prNetDevPriv->ucIsP2p = FALSE;
 #endif
-#if CFG_MTK_MDDP_WH_SUPPORT
+#if CFG_MTK_MDDP_SUPPORT
 		prNetDevPriv->ucMddpSupport = TRUE;
 #else
 		prNetDevPriv->ucMddpSupport = FALSE;
@@ -1271,13 +1290,16 @@ u_int8_t glRegisterP2P(struct GLUE_INFO *prGlueInfo, const char *prDevName,
 	struct device *prDev;
 #endif
 
+	GLUE_SPIN_LOCK_DECLARATION();
+
 	ASSERT(prGlueInfo);
 
 	prAdapter = prGlueInfo->prAdapter;
 	ASSERT(prAdapter);
 
 	if ((ucApMode == RUNNING_DUAL_AP_MODE) ||
-	    (ucApMode == RUNNING_P2P_AP_MODE)) {
+	    (ucApMode == RUNNING_P2P_AP_MODE) ||
+	    (ucApMode == RUNNING_DUAL_P2P_MODE)) {
 		ucRegisterNum = 2;
 		glP2pCreateWirelessDevice(prGlueInfo);
 	}
@@ -1295,10 +1317,12 @@ u_int8_t glRegisterP2P(struct GLUE_INFO *prGlueInfo, const char *prDevName,
 			/* RUNNING_AP_MODE
 			 * RUNNING_DUAL_AP_MODE
 			 * RUNNING_P2P_MODE
+			 * RUNNING_DUAL_P2P_MODE
 			 */
 			prSetDevName = prDevName;
 
-			if (ucApMode == RUNNING_P2P_MODE)
+			if (ucApMode == RUNNING_P2P_MODE ||
+				ucApMode == RUNNING_DUAL_P2P_MODE)
 				fgIsApMode = FALSE;
 			else
 				fgIsApMode = TRUE;
@@ -1363,11 +1387,13 @@ u_int8_t glRegisterP2P(struct GLUE_INFO *prGlueInfo, const char *prDevName,
 		i++;
 		/* prP2pInfo is alloc at glSetupP2P()->p2PAllocInfo() */
 		prAdapter->prP2pInfo->u4DeviceNum++;
-
-		/* set p2p net device register state */
-		/* p2pNetRegister() will check prAdapter->rP2PNetRegState. */
-		prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_UNREGISTERED;
 	} while (i < ucRegisterNum);
+
+	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+	/* set p2p net device register state */
+	/* p2pNetRegister() will check prAdapter->rP2PNetRegState. */
+	prAdapter->rP2PNetRegState = ENUM_NET_REG_STATE_UNREGISTERED;
+	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
 	return TRUE;
 #if 0
@@ -1414,6 +1440,9 @@ u_int8_t glP2pCreateWirelessDevice(struct GLUE_INFO *prGlueInfo)
 	DBGLOG(INIT, TRACE, "glP2pCreateWirelessDevice (%p)\n",
 			gprP2pRoleWdev[i]->wiphy);
 
+	/* P2PDev and P2PRole[0] share the same Wdev */
+	gprP2pWdev[i] = gprP2pRoleWdev[i];
+
 	return TRUE;
 #else
 	return FALSE;
@@ -1451,6 +1480,10 @@ u_int8_t glP2pCreateWirelessDevice(struct GLUE_INFO *prGlueInfo)
 
 	prWiphy->bands[KAL_BAND_2GHZ] = &mtk_band_2ghz;
 	prWiphy->bands[KAL_BAND_5GHZ] = &mtk_band_5ghz;
+#if (CFG_SUPPORT_WIFI_6G == 1)
+	prWiphy->bands[KAL_BAND_6GHZ] = &mtk_band_6ghz;
+	DBGLOG(INIT, INFO, "P2P support 6G\n");
+#endif
 
 	prWiphy->mgmt_stypes = mtk_cfg80211_default_mgmt_stypes;
 	prWiphy->max_remain_on_channel_duration = 5000;
@@ -1746,7 +1779,7 @@ static int p2pStop(IN struct net_device *prDev)
 
 	/* XXX: The p2pStop may be triggered after the wlanRemove.	*/
 	/*      And prGlueInfo->prP2PDevInfo is freed in p2PFreeInfo.	*/
-	if (!prAdapter->fgIsP2PRegistered)
+	if (!prAdapter || !prAdapter->fgIsP2PRegistered)
 		return -EFAULT;
 
 	prP2pGlueDevInfo = prGlueInfo->prP2PDevInfo;
@@ -1830,11 +1863,11 @@ struct net_device_stats *p2pGetStats(IN struct net_device *prDev)
 			netdev_priv(prDev);
 	kalMemCopy(&prNetDevPrivate->stats, &prDev->stats,
 			sizeof(struct net_device_stats));
-#if CFG_MTK_MDDP_WH_SUPPORT
+#if CFG_MTK_MDDP_SUPPORT
 	mddpGetMdStats(prDev);
 #endif
 
-	return (struct net_device_stats *) kalGetStats(prDev);
+	return (struct net_device_stats *) &prNetDevPrivate->stats;
 }				/* end of p2pGetStats() */
 
 static void p2pSetMulticastList(IN struct net_device *prDev)
@@ -1874,7 +1907,14 @@ void mtk_p2p_wext_set_Multicastlist(struct GLUE_INFO *prGlueInfo)
 {
 	uint32_t u4SetInfoLen = 0;
 	uint32_t u4McCount;
-	struct net_device *prDev = g_P2pPrDev;
+	struct net_device *prDev = NULL;
+
+	GLUE_SPIN_LOCK_DECLARATION();
+	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+
+	prDev = g_P2pPrDev;
+
+	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
 	prGlueInfo = (prDev != NULL)
 		? *((struct GLUE_INFO **) netdev_priv(prDev))
@@ -2193,22 +2233,32 @@ int p2pSetMACAddress(IN struct net_device *prDev, void *addr)
 		return -EINVAL;
 	}
 
+	sa = (struct sockaddr *)addr;
+
 	if (mtk_Netdev_To_RoleIdx(prGlueInfo, prDev, &ucRoleIdx) != 0) {
 		DBGLOG(INIT, ERROR, "can't find the matched dev");
-		return -EINVAL;
+		goto skip_role;
 	}
 
 	if (p2pFuncRoleToBssIdx(prGlueInfo->prAdapter,
 		ucRoleIdx, &ucBssIdx) != WLAN_STATUS_SUCCESS) {
 		DBGLOG(INIT, ERROR, "can't find the matched bss");
-		return -EINVAL;
+		goto skip_role;
 	}
 
 	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIdx);
 	if (!prBssInfo) {
 		DBGLOG(INIT, ERROR, "bss is not active\n");
-		return -EINVAL;
+		goto skip_role;
+	} else {
+		COPY_MAC_ADDR(prBssInfo->aucOwnMacAddr,
+			sa->sa_data);
+		COPY_MAC_ADDR(
+			prAdapter->rWifiVar.aucInterfaceAddress[ucRoleIdx],
+			sa->sa_data);
 	}
+
+skip_role:
 
 	prDevBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter,
 		prAdapter->ucP2PDevBssIdx);
@@ -2223,12 +2273,7 @@ int p2pSetMACAddress(IN struct net_device *prDev, void *addr)
 		return -EINVAL;
 	}
 
-	sa = (struct sockaddr *)addr;
-
-	COPY_MAC_ADDR(prBssInfo->aucOwnMacAddr, sa->sa_data);
 	COPY_MAC_ADDR(prDev->dev_addr, sa->sa_data);
-	COPY_MAC_ADDR(prAdapter->rWifiVar.aucInterfaceAddress[ucRoleIdx],
-			sa->sa_data);
 
 	if ((prP2pInfo->prDevHandler == prDev)
 		&& mtk_IsP2PNetDevice(prGlueInfo, prDev)) {
@@ -2240,7 +2285,7 @@ int p2pSetMACAddress(IN struct net_device *prDev, void *addr)
 			ucBssIdx,
 			prDevBssInfo->ucBssIndex,
 			MAC2STR(prDevBssInfo->aucOwnMacAddr));
-	} else {
+	} else if (prBssInfo) {
 		DBGLOG(INIT, INFO,
 			"[%d] Set random macaddr to " MACSTR ".\n",
 			ucBssIdx,

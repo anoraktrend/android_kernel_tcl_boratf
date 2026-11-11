@@ -44,10 +44,16 @@
 #if WMT_CREATE_NODE_DYNAMIC
 #include <linux/device.h>
 #endif
+#include <linux/version.h>
 #ifdef CONFIG_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+#include <linux/of.h>
+#include "mtk_disp_notify.h"
+#else
 #include <linux/fb.h>
+#endif
 #endif
 #include <linux/proc_fs.h>
 #include <mtk_wcn_cmb_stub.h>
@@ -214,6 +220,44 @@ struct early_suspend wmt_early_suspend_handler = {
 #else
 
 static struct notifier_block wmt_fb_notifier;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+static INT32 wmt_fb_notifier_callback(struct notifier_block *nb, ULONG value, PVOID v)
+{
+	int data = 0;
+
+	if (!v)
+		return 0;
+
+	data = *(int *)v;
+
+	WMT_DBG_FUNC("wmt_fb_notifier_callback\n");
+
+	if (value == MTK_DISP_EVENT_BLANK) {
+		pr_info("%s+\n", __func__);
+		if (data == MTK_DISP_BLANK_UNBLANK) {
+			atomic_set(&g_es_lr_flag_for_quick_sleep, 0);
+			atomic_set(&g_es_lr_flag_for_lpbk_onoff, 1);
+			atomic_set(&g_es_lr_flag_for_blank, 1);
+			WMT_WARN_FUNC("@@@@@@@@@@wmt enter UNBLANK @@@@@@@@@@@@@@\n");
+			if (hif_info == 0)
+				atomic_set(&g_late_pwr_on_for_blank, 1);
+			else
+				schedule_work(&gPwrOnOffWork);
+		} else if (data == MTK_DISP_BLANK_POWERDOWN) {
+			atomic_set(&g_es_lr_flag_for_quick_sleep, 1);
+			atomic_set(&g_es_lr_flag_for_lpbk_onoff, 0);
+			atomic_set(&g_es_lr_flag_for_blank, 0);
+			WMT_WARN_FUNC("@@@@@@@@@@wmt enter early POWERDOWN @@@@@@@@@@@@@@\n");
+			schedule_work(&gPwrOnOffWork);
+		} else {
+			WMT_WARN_FUNC("@@@@@@@@@@data(%d) is not UNBLANK or POWERDOWN @@@@@@@@@@@@@@\n", data);
+		}
+		pr_info("%s-\n", __func__);
+	}
+
+	return 0;
+}
+#else
 static INT32 wmt_fb_notifier_callback(struct notifier_block *self, ULONG event, PVOID data)
 {
 	struct fb_event *evdata = data;
@@ -252,6 +296,7 @@ static INT32 wmt_fb_notifier_callback(struct notifier_block *self, ULONG event, 
 	}
 	return 0;
 }
+#endif
 #endif /* CONFIG_EARLYSUSPEND */
 /*******************************************************************************
 *                          F U N C T I O N S
@@ -278,9 +323,7 @@ static VOID wmt_pwr_on_off_handler(struct work_struct *work)
 	/* Update blank off status before wmt power off */
 	if (wmt_dev_get_blank_state() == 0) {
 		wmt_dev_blank_handler();
-#if 0
 		connsys_log_blank_state_changed(0);
-#endif
 	}
 
 	if (always_pwr_on_flag == 0) {
@@ -296,9 +339,7 @@ static VOID wmt_pwr_on_off_handler(struct work_struct *work)
 	/* Update blank on status after wmt power on */
 	if (wmt_dev_get_blank_state() == 1) {
 		wmt_dev_blank_handler();
-#if 0
 		connsys_log_blank_state_changed(1);
-#endif
 	}
 }
 
@@ -463,10 +504,10 @@ MTK_WCN_BOOL wmt_dev_is_file_exist(PUINT8 pFileName)
 	return true;
 }
 
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 static ULONG count_last_access_sdio;
 static ULONG count_last_access_btif;
 static ULONG count_last_access_uart;
-static ULONG jiffies_last_poll;
 
 static INT32 wmt_dev_tra_sdio_update(VOID)
 {
@@ -491,6 +532,9 @@ extern INT32 wmt_dev_tra_uart_update(VOID)
 
 	return 0;
 }
+#endif
+
+static ULONG jiffies_last_poll;
 
 static UINT32 wmt_dev_tra_poll(VOID)
 {
@@ -508,14 +552,20 @@ static UINT32 wmt_dev_tra_poll(VOID)
 	else
 		poll_during_time = 0xffffffff;
 
+	WMT_DBG_FUNC("**jiffies_to_mesecs(0xffffffff) = %d\n", jiffies_to_msecs(0xffffffff));
+
 	if (jiffies_to_msecs(poll_during_time) < TIME_THRESHOLD_TO_TEMP_QUERY) {
+		WMT_DBG_FUNC("**poll_during_time = %d < %d, not to query\n",
+			     jiffies_to_msecs(poll_during_time), TIME_THRESHOLD_TO_TEMP_QUERY);
 		return -1;
 	}
 
 	switch (chip_type) {
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	case WMT_CHIP_TYPE_COMBO:
 		during_count = count_last_access_sdio;
 		break;
+#endif
 	case WMT_CHIP_TYPE_SOC:
 		if (mtk_wcn_wlan_bus_tx_cnt == NULL) {
 			WMT_ERR_FUNC("WMT-DEV:mtk_wcn_wlan_bus_tx_cnt null pointer\n");
@@ -532,16 +582,25 @@ static UINT32 wmt_dev_tra_poll(VOID)
 	}
 
 	if (during_count < COUNT_THRESHOLD_TO_TEMP_QUERY) {
+		WMT_DBG_FUNC("**during_count = %lu < %d, not to query\n", during_count,
+				COUNT_THRESHOLD_TO_TEMP_QUERY);
 		return -2;
 	}
 
 	jiffies_last_poll = jiffies;
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	if (chip_type == WMT_CHIP_TYPE_COMBO)
 		count_last_access_sdio = 0;
 	else if (chip_type == WMT_CHIP_TYPE_SOC)
+#else
+	if (chip_type == WMT_CHIP_TYPE_SOC)
+#endif
 		(*mtk_wcn_wlan_bus_tx_cnt_clr)();
 	else
 		WMT_ERR_FUNC("WMT-DEV:error chip type(%d)\n", chip_type);
+	WMT_INFO_FUNC("**poll_during_time = %d > %d, during_count = %d > %d, query\n",
+		      jiffies_to_msecs(poll_during_time), TIME_THRESHOLD_TO_TEMP_QUERY,
+		      jiffies_to_msecs(during_count), COUNT_THRESHOLD_TO_TEMP_QUERY);
 
 	return 0;
 }
@@ -557,18 +616,18 @@ LONG wmt_dev_tm_temp_query(VOID)
 #define HISTORY_NUM       3
 #define REFRESH_TIME    300	/* sec */
 #define ONE_DAY_LONG    86400	/* sec */
-#define MAX_TEMP    0x54 /* Max temperature for Connsys chip */
+#define MAX_TEMP    0x69 /* Max temperature for Connsys chip */
 
 	static INT32 s_temp_table[HISTORY_NUM] = { 99 };	/* not query yet. */
 	static INT32 s_idx_temp_table;
-	static struct timeval s_query_time;
-	static struct timeval sync_log_last_time = {0, 0};
+	static struct timespec64 s_query_time;
+	static struct timespec64 sync_log_last_time = {0, 0};
 
 	INT32 temp_table[HISTORY_NUM];
 	INT32 idx_temp_table;
-	struct timeval query_time;
+	struct timespec64 query_time;
 
-	struct timeval now_time;
+	struct timespec64 now_time;
 	INT32 current_temp = 0;
 	INT32 index = 0;
 	LONG return_temp = 0;
@@ -577,7 +636,7 @@ LONG wmt_dev_tm_temp_query(VOID)
 	/* Let us work on the copied version of function static variables */
 	osal_lock_unsleepable_lock(&g_temp_query_spinlock);
 	osal_memcpy(temp_table, s_temp_table, sizeof(s_temp_table));
-	osal_memcpy(&query_time, &s_query_time, sizeof(struct timeval));
+	osal_memcpy(&query_time, &s_query_time, sizeof(struct timespec64));
 	idx_temp_table = s_idx_temp_table;
 	osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
 
@@ -631,7 +690,7 @@ LONG wmt_dev_tm_temp_query(VOID)
 			query_cond = 1;
 
 			WMT_INFO_FUNC
-				("It is long time (prev(%lu), now(%lu), > %d sec) not to query, query temp again..\n",
+				("It is long time (prev(%llu), now(%llu), > %d sec) not to query, query temp again..\n",
 				 query_time.tv_sec, now_time.tv_sec, REFRESH_TIME);
 			for (index = 0; index < HISTORY_NUM; index++)
 				temp_table[index] = 99;
@@ -664,6 +723,13 @@ LONG wmt_dev_tm_temp_query(VOID)
 			index = s_idx_temp_table;
 		}
 		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
+
+		if (index == -1) {
+			WMT_INFO_FUNC("[Thermal] current_temp = 0x%x\n", (current_temp & 0xFF));
+		} else {
+			WMT_ERR_FUNC("Temperature(0x%x) update failed due to modified idx_temp_table(%d, %d)",
+				(current_temp & 0xFF), idx_temp_table, index);
+		}
 	} else {
 		/* Only update temperature if our index hasn't been modified by the concurrent thread */
 		osal_lock_unsleepable_lock(&g_temp_query_spinlock);
@@ -678,11 +744,14 @@ LONG wmt_dev_tm_temp_query(VOID)
 			index = s_idx_temp_table;
 		}
 		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
+		if (index != -1) {
+			WMT_DBG_FUNC("Use last valid temperature (0x%x) due to modified idx_temp_table(%d, %d)",
+				(current_temp & 0xFF), idx_temp_table, index);
+		}
 	}
 
 	return_temp = ((current_temp & 0x80) == 0x0) ? current_temp : (-1) * (current_temp & 0x7f);
 
-#if 0
 	/*  */
 	/* Dump information */
 	/*  */
@@ -690,14 +759,13 @@ LONG wmt_dev_tm_temp_query(VOID)
 		osal_lock_unsleepable_lock(&g_temp_query_spinlock);
 		WMT_INFO_FUNC("[Thermal] s_idx_temp_table = %d, idx_temp_table = %d\n",
 			s_idx_temp_table, idx_temp_table);
-		WMT_INFO_FUNC("[Thermal] now.time = %lu, s_query.time = %lu, query.time = %lu, REFRESH_TIME = %d\n",
+		WMT_INFO_FUNC("[Thermal] now.time = %llu, s_query.time = %llu, query.time = %llu, REFRESH_TIME = %d\n",
 			now_time.tv_sec, s_query_time.tv_sec, query_time.tv_sec, REFRESH_TIME);
 
 		WMT_INFO_FUNC("[0] = %d, [1] = %d, [2] = %d\n----\n",
 			s_temp_table[0], s_temp_table[1], s_temp_table[2]);
 		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
 	}
-#endif
 
 	if (return_temp > MAX_TEMP) {
 		return_temp = MAX_TEMP;
@@ -1022,7 +1090,10 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 				WMT_INFO_FUNC("stp dump start.\n");
 			else {
 				WMT_INFO_FUNC("Trigger kernel api dump.\n");
-				if (wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO ||
+				if (
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
+					wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO ||
+#endif
 					mtk_wcn_stp_coredump_flag_get() == 2) {
 					pBuffer = kmalloc(NAME_MAX + 1, GFP_KERNEL);
 					if (!pBuffer) {
@@ -1161,12 +1232,14 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 		break;
 	case WMT_IOCTL_WMT_TELL_CHIPID:
 		{
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 #if !(DELETE_HIF_SDIO_CHRDEV)
 			iRet = mtk_wcn_hif_sdio_tell_chipid(arg);
 #endif
 			if (0x6628 == arg || 0x6630 == arg || 0x6632 == arg)
 				wmt_lib_merge_if_flag_ctrl(1);
 			else
+#endif
 				wmt_lib_merge_if_flag_ctrl(0);
 		}
 		break;
@@ -1553,6 +1626,11 @@ UINT8 wmt_dev_is_close(VOID)
 	return gWmtClose;
 }
 
+static INT32 wmt_dev_trigger_assert_cb(UINT32 type, UINT32 reason)
+{
+	return wmt_lib_trigger_assert(type, reason);
+}
+
 static INT32 WMT_init(VOID)
 {
 	dev_t devID = MKDEV(gWmtMajor, 0);
@@ -1573,7 +1651,9 @@ static INT32 WMT_init(VOID)
 #if (MTK_WCN_REMOVE_KO)
 	/* called in do_common_drv_init() */
 #else
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	mtk_wcn_hif_sdio_drv_init();
+#endif
 #endif
 	stp_drv_init();
 
@@ -1641,11 +1721,13 @@ static INT32 WMT_init(VOID)
 	WMT_STEP_INIT_FUNC();
 
 	chip_type = wmt_detect_get_chip_type();
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	if (chip_type == WMT_CHIP_TYPE_COMBO)
 		mtk_wcn_hif_sdio_update_cb_reg(wmt_dev_tra_sdio_update);
+#endif
 
 	wmt_lib_register_thermal_ctrl_cb(wmt_dev_tm_temp_query);
-	wmt_lib_register_trigger_assert_cb(wmt_lib_trigger_assert);
+	wmt_lib_register_trigger_assert_cb(wmt_dev_trigger_assert_cb);
 
 	if (chip_type == WMT_CHIP_TYPE_SOC)
 		wmt_dev_bgw_desense_init();
@@ -1659,7 +1741,11 @@ static INT32 WMT_init(VOID)
 	WMT_INFO_FUNC("register_early_suspend finished\n");
 #else
 	wmt_fb_notifier.notifier_call = wmt_fb_notifier_callback;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+	ret = mtk_disp_notifier_register("wmt_driver", &wmt_fb_notifier);
+#else
 	ret = fb_register_client(&wmt_fb_notifier);
+#endif
 	if (ret)
 		WMT_ERR_FUNC("wmt register fb_notifier failed! ret(%d)\n", ret);
 	else
@@ -1669,7 +1755,7 @@ static INT32 WMT_init(VOID)
 
 #if (MTK_WCN_REMOVE_KO)
 	/* called in do_common_drv_init() */
-#else
+#elif defined(MTK_WCN_COMBO_CHIP_SUPPORT)
 	mtk_wcn_stp_uart_drv_init();
 	mtk_wcn_stp_sdio_drv_init();
 #endif
@@ -1717,12 +1803,18 @@ static VOID WMT_exit(VOID)
 	unregister_early_suspend(&wmt_early_suspend_handler);
 	WMT_INFO_FUNC("unregister_early_suspend finished\n");
 #else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+	mtk_disp_notifier_unregister(&wmt_fb_notifier);
+#else
 	fb_unregister_client(&wmt_fb_notifier);
+#endif
 #endif /* CONFIG_EARLYSUSPEND */
 
 	wmt_dev_patch_info_free();
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	mtk_wcn_stp_uart_drv_exit();
 	mtk_wcn_stp_sdio_drv_exit();
+#endif
 
 	wmt_dev_bgw_desense_deinit();
 
@@ -1753,7 +1845,9 @@ static VOID WMT_exit(VOID)
 	gWmtMajor = -1;
 
 	stp_drv_exit();
+#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 	mtk_wcn_hif_sdio_driver_exit();
+#endif
 	gWmtInitStatus = WMT_INIT_NOT_START;
 	WMT_INFO_FUNC("done\n");
 }

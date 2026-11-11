@@ -9,7 +9,6 @@
 * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
 */
 
-#include <cpu_ctrl.h>
 #include <topo_ctrl.h>
 #include "gl_os.h"
 
@@ -23,7 +22,6 @@
 		mtk_pm_qos_remove_request(_req)
 #define pm_qos_request mtk_pm_qos_request
 #define PM_QOS_DDR_OPP MTK_PM_QOS_DDR_OPP
-#define ppm_limit_data cpu_ctrl_data
 #else
 #include <linux/pm_qos.h>
 #include <helio-dvfsrc-opp.h>
@@ -31,7 +29,7 @@
 
 #include "precomp.h"
 
-#ifdef CONFIG_MTK_EMI
+#ifdef CONFIG_WLAN_MTK_EMI
 #include <mt_emi_api.h>
 #define WIFI_EMI_MEM_OFFSET    0x140000
 #define WIFI_EMI_MEM_SIZE      0x130000
@@ -40,27 +38,12 @@
 #define MAX_CPU_FREQ (3 * 1024 * 1024) /* in kHZ */
 #define MAX_CLUSTER_NUM  3
 
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE || !defined(CONFIG_MTK_CPU_CTRL)
-#else
 int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 		    IN uint32_t u4TarPerfLevel,
 		    IN uint32_t u4BoostCpuTh)
 {
-	struct ppm_limit_data freq_to_set[MAX_CLUSTER_NUM];
-	int32_t i = 0, i4Freq = -1;
 	static struct pm_qos_request wifi_qos_request;
 	static u_int8_t fgRequested;
-	uint32_t u4ClusterNum = topo_ctrl_get_nr_clusters();
-
-	ASSERT(u4ClusterNum <= MAX_CLUSTER_NUM);
-	/* ACAO, we dont have to set core number */
-	i4Freq = (u4TarPerfLevel >= u4BoostCpuTh) ? MAX_CPU_FREQ : -1;
-	for (i = 0; i < u4ClusterNum; i++) {
-		freq_to_set[i].min = i4Freq;
-		freq_to_set[i].max = i4Freq;
-	}
-
-	update_userlimit_cpu_freq(CPU_KIR_WIFI, u4ClusterNum, freq_to_set);
 
 	if (u4TarPerfLevel >= u4BoostCpuTh) {
 		if (!fgRequested) {
@@ -77,9 +60,8 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 	}
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_MTK_EMI
+#ifdef CONFIG_WLAN_MTK_EMI
 void kalSetEmiMpuProtection(phys_addr_t emiPhyBase, bool enable)
 {
 }
@@ -89,18 +71,19 @@ void kalSetDrvEmiMpuProtection(phys_addr_t emiPhyBase, uint32_t offset,
 {
 	struct emi_region_info_t region_info;
 
-	DBGLOG(INIT, INFO, "emiPhyBase: 0x%x, offset: %u, size: %u\n",
+	/*
+	 * Region 24 matches the stock (TCL) wlan driver on Bora_TF; the
+	 * LK/ATF on this board keeps region 29 locked or reserved, so writes
+	 * there are silently dropped and the CONNSYS WIFI PDMA keeps hitting
+	 * EMI MPU violations on the reserved buffer. Log at ERROR level so
+	 * this is visible without raising the driver debug level.
+	 */
+	DBGLOG(INIT, ERROR, "emiPhyBase: 0x%x, offset: %u, size: %u\n",
 			emiPhyBase, offset, size);
 
 	/*set MPU for EMI share Memory */
 	region_info.start = emiPhyBase + offset;
 	region_info.end = emiPhyBase + offset + size - 1;
-	/*
-	 * Region 24 matches the stock (TCL) wlan driver on Bora_TF; this
-	 * LK/ATF keeps region 29 locked or reserved, so writes there are
-	 * silently dropped and the CONNSYS WiFi PDMA stays firewalled
-	 * (firmware download fails with "Chip No Ack").
-	 */
 	region_info.region = 24;
 	SET_ACCESS_PERMISSION(region_info.apc, LOCK, FORBIDDEN, FORBIDDEN,
 			      FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,
@@ -110,3 +93,23 @@ void kalSetDrvEmiMpuProtection(phys_addr_t emiPhyBase, uint32_t offset,
 	emi_mpu_set_protection(&region_info);
 }
 #endif
+
+uint32_t kalGetCpuBoostThreshold(void)
+{
+	/*  1, stands for 20Mbps */
+	return 1;
+}
+
+int32_t kalCheckTputLoad(IN struct ADAPTER *prAdapter,
+			 IN uint32_t u4CurrPerfLevel,
+			 IN uint32_t u4TarPerfLevel,
+			 IN int32_t i4Pending,
+			 IN uint32_t u4Used)
+{
+	return FALSE;
+}
+
+int32_t kalGetFwFlavorByPlat(uint8_t *flavor)
+{
+	return 0;
+}

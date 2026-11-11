@@ -157,8 +157,7 @@ void connacConstructFirmwarePrio(struct GLUE_INFO *prGlueInfo,
 				apucConnacFwName[ucIdx],
 				CFG_WIFI_IP_SET,
 				aucFlavor,
-				wlanGetEcoVersion(
-					prGlueInfo->prAdapter));
+				1);
 		if (ret >= 0 && ret < CFG_FW_NAME_MAX_LEN)
 			(*pucNameIdx) += 1;
 		else
@@ -173,8 +172,7 @@ void connacConstructFirmwarePrio(struct GLUE_INFO *prGlueInfo,
 				apucConnacFwName[ucIdx],
 				CFG_WIFI_IP_SET,
 				aucFlavor,
-				wlanGetEcoVersion(
-					prGlueInfo->prAdapter));
+				1);
 		if (ret >= 0 && ret < CFG_FW_NAME_MAX_LEN)
 			(*pucNameIdx) += 1;
 		else
@@ -320,6 +318,7 @@ struct CHIP_DBG_OPS connac_debug_ops = {
 	.showCsrInfo = halShowHostCsrInfo,
 	.showDmaschInfo = halShowDmaschInfo,
 	.dumpMacInfo = haldumpMacInfo,
+	.dumpTxdInfo = halDumpTxdInfo,
 #else
 	.showPdmaInfo = NULL,
 	.showPseInfo = NULL,
@@ -328,6 +327,7 @@ struct CHIP_DBG_OPS connac_debug_ops = {
 	.showCsrInfo = NULL,
 	.showDmaschInfo = NULL,
 	.dumpMacInfo = NULL,
+	.dumpTxdInfo = NULL,
 #endif
 	.showWtblInfo = NULL,
 	.showHifInfo = NULL,

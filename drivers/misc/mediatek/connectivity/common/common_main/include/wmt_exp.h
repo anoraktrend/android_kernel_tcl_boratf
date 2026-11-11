@@ -20,7 +20,6 @@
 #ifndef _WMT_EXP_H_
 #define _WMT_EXP_H_
 
-#include <linux/printk.h>
 #include <mtk_wcn_cmb_stub.h>
 #include "osal.h"
 #include "wmt_plat.h"
@@ -41,12 +40,36 @@
 #define DFT_TAG         "[WMT-DFT]"
 #endif
 
-#define WMT_LOUD_FUNC(fmt, arg...) no_printk(DFT_TAG "[L]%s:" fmt, __func__, ##arg)
-#define WMT_INFO_FUNC(fmt, arg...) no_printk(DFT_TAG "[I]%s:" fmt, __func__, ##arg)
-#define WMT_WARN_FUNC(fmt, arg...) no_printk(DFT_TAG "[W]%s:" fmt, __func__, ##arg)
-#define WMT_ERR_FUNC(fmt, arg...) no_printk(DFT_TAG "[E]%s(%d):" fmt, __func__, __LINE__, ##arg)
-#define WMT_DBG_FUNC(fmt, arg...) no_printk(DFT_TAG "[D]%s:" fmt, __func__, ##arg)
-#define WMT_TRC_FUNC(f) no_printk(DFT_TAG "<%s> <%d>\n", __func__, __LINE__)
+#define WMT_LOUD_FUNC(fmt, arg...) \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_LOUD) \
+		osal_warn_print(DFT_TAG "[L]%s:"  fmt, __func__, ##arg); \
+} while (0)
+#define WMT_INFO_FUNC(fmt, arg...)  \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_INFO) \
+		osal_warn_print(DFT_TAG "[I]%s:"  fmt, __func__, ##arg); \
+} while (0)
+#define WMT_WARN_FUNC(fmt, arg...) \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_WARN) \
+		osal_warn_print(DFT_TAG "[W]%s:"  fmt, __func__, ##arg); \
+} while (0)
+#define WMT_ERR_FUNC(fmt, arg...) \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_ERR) \
+		osal_err_print(DFT_TAG "[E]%s(%d):"  fmt, __func__, __LINE__, ##arg); \
+} while (0)
+#define WMT_DBG_FUNC(fmt, arg...) \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_DBG) \
+		osal_warn_print(DFT_TAG "[D]%s:"  fmt, __func__, ##arg); \
+} while (0)
+#define WMT_TRC_FUNC(f) \
+do { \
+	if (gWmtDbgLvl >= WMT_LOG_DBG) \
+		osal_warn_print(DFT_TAG "<%s> <%d>\n", __func__, __LINE__); \
+} while (0)
 
 #endif
 
@@ -376,7 +399,6 @@ extern ENUM_WMTHWVER_TYPE_T mtk_wcn_wmt_hwver_get(VOID);
 extern UINT32 mtk_wcn_wmt_ic_info_get(ENUM_WMT_CHIPINFO_TYPE_T type);
 
 extern UINT32 mtk_wcn_wmt_adie_workable(VOID);
-
 
 extern INT32 mtk_wcn_wmt_chipid_query(VOID);
 

@@ -22,6 +22,9 @@
 /* #include "fm_cust_cfg.h" */
 #include "fm_cmd.h"
 
+/* fm self reset flag */
+static bool g_fm_trigger_rst;
+
 /* fm main data structure */
 static struct fm *g_fm_struct;
 /* we must get low level interface first, when add a new chip, the main effort is this interface */
@@ -34,7 +37,6 @@ static struct fm_lock *fm_read_lock;
 /* for get rds block counter */
 static struct fm_lock *fm_rds_cnt;
 /* mutex for fm timer, RDS reset */
-static struct fm_lock *fm_timer_lock;
 static struct fm_lock *fm_rxtx_lock;	/* protect FM RX TX mode switch */
 static struct fm_lock *fm_rtc_mutex;	/* protect FM GPS RTC drift info */
 
@@ -256,6 +258,8 @@ signed int fm_subsys_reset(struct fm *fm)
 		WCN_DBG(FM_ERR | MAIN, "%s,invalid pointer\n", __func__);
 		return -FM_EPARA;
 	}
+
+	g_fm_trigger_rst = true;
 	fm->timer_wkthd->add_work(fm->timer_wkthd, fm->rst_wk);
 
 out:
@@ -1883,21 +1887,15 @@ static void fm_timer_func(unsigned long data)
 {
 	struct fm *fm = g_fm_struct;
 
-	if (FM_LOCK(fm_timer_lock))
-		return;
-
 	if (fm_timer_sys->update(fm_timer_sys)) {
 		WCN_DBG(FM_NTC | MAIN, "timer skip\n");
-		goto out;	/* fm timer is stopped before timeout */
+		return;	/* fm timer is stopped before timeout */
 	}
 
 	if (fm != NULL) {
 		WCN_DBG(FM_DBG | MAIN, "timer:rds_wk\n");
 		fm->timer_wkthd->add_work(fm->timer_wkthd, fm->rds_wk);
 	}
-
-out:
-	FM_UNLOCK(fm_timer_lock);
 }
 
 #if (FM_INVALID_CHAN_NOISE_REDUCING)
@@ -1909,21 +1907,15 @@ static void fm_cqi_check_timer_func(unsigned long data)
 {
 	struct fm *fm = g_fm_struct;
 
-	if (FM_LOCK(fm_timer_lock))
-		return;
-
 	if (fm_cqi_check_timer->update(fm_cqi_check_timer)) {
 		WCN_DBG(FM_NTC | MAIN, "timer skip\n");
-		goto out;	/* fm timer is stopped before timeout */
+		return;	/* fm timer is stopped before timeout */
 	}
 
 	if (fm != NULL) {
 		WCN_DBG(FM_DBG | MAIN, "timer:ch_valid_check_wk\n");
 		fm->timer_wkthd->add_work(fm->timer_wkthd, fm->ch_valid_check_wk);
 	}
-
-out:
-	FM_UNLOCK(fm_timer_lock);
 }
 #endif
 
@@ -2105,19 +2097,13 @@ out:
 
 static void fm_enable_rds_BlerCheck(struct fm *fm)
 {
-	if (FM_LOCK(fm_timer_lock))
-		return;
 	fm_timer_sys->start(fm_timer_sys);
-	FM_UNLOCK(fm_timer_lock);
 	WCN_DBG(FM_INF | MAIN, "enable rds timer ok\n");
 }
 
 static void fm_disable_rds_BlerCheck(void)
 {
-	if (FM_LOCK(fm_timer_lock))
-		return;
 	fm_timer_sys->stop(fm_timer_sys);
-	FM_UNLOCK(fm_timer_lock);
 	WCN_DBG(FM_INF | MAIN, "stop rds timer ok\n");
 }
 
@@ -2184,9 +2170,11 @@ void fm_cqi_check_work_func(struct work_struct *work)
 
 void fm_subsys_reset_work_func(struct work_struct *work)
 {
-	g_dbg_level = 0xffffffff;
 	if (FM_LOCK(fm_ops_lock))
 		return;
+
+	if (g_fm_trigger_rst == true)
+		g_dbg_level = 0xffffffff;
 
 	fm_sys_state_set(g_fm_struct, FM_SUBSYS_RST_START);
 
@@ -2258,7 +2246,11 @@ out:
 	g_fm_struct->wholechiprst = true;
 
 	FM_UNLOCK(fm_ops_lock);
-	g_dbg_level = 0xfffffff5;
+
+	if (g_fm_trigger_rst == true) {
+		g_dbg_level = 0xfffffff5;
+		g_fm_trigger_rst = false;
+	}
 }
 
 void fm_pwroff_work_func(struct work_struct *work)
@@ -2440,7 +2432,7 @@ struct fm *fm_dev_init(unsigned int arg)
 	gps_rtc_info.age = 0;
 	gps_rtc_info.drift = 0;
 	gps_rtc_info.tv.tv_sec = 0;
-	gps_rtc_info.tv.tv_usec = 0;
+	gps_rtc_info.tv.tv_nsec = 0;
 	gps_rtc_info.ageThd = FM_GPS_RTC_AGE_TH;
 	gps_rtc_info.driftThd = FM_GPS_RTC_DRIFT_TH;
 	gps_rtc_info.tvThd.tv_sec = FM_GPS_RTC_TIME_DIFF_TH;
@@ -2651,8 +2643,9 @@ signed int fm_dev_destroy(struct fm *fm)
 
 	fm_timer_sys->stop(fm_timer_sys);
 #if (FM_INVALID_CHAN_NOISE_REDUCING)
-	fm_timer_sys->stop(fm_cqi_check_timer);
+	fm_cqi_check_timer_func->stop(fm_cqi_check_timer);
 #endif
+
 	if (!fm) {
 		WCN_DBG(FM_NTC | MAIN, "fm is null\n");
 		return -1;
@@ -2748,10 +2741,6 @@ signed int fm_env_setup(void)
 	if (!fm_rds_cnt)
 		return -1;
 
-	fm_timer_lock = fm_spin_lock_create("timer_lock");
-	if (!fm_timer_lock)
-		return -1;
-
 	fm_rxtx_lock = fm_lock_create("rxtx_lock");
 	if (!fm_rxtx_lock)
 		return -1;
@@ -2771,7 +2760,6 @@ signed int fm_env_setup(void)
 	fm_lock_get(fm_ops_lock);
 	fm_lock_get(fm_read_lock);
 	fm_lock_get(fm_rds_cnt);
-	fm_spin_lock_get(fm_timer_lock);
 	fm_lock_get(fm_rxtx_lock);
 	fm_lock_get(fm_rtc_mutex);
 	fm_lock_get(fm_wcn_ops.tx_lock);
@@ -2844,10 +2832,6 @@ signed int fm_env_destroy(void)
 	ret = fm_lock_put(fm_rds_cnt);
 	if (!ret)
 		fm_rds_cnt = NULL;
-
-	ret = fm_spin_lock_put(fm_timer_lock);
-	if (!ret)
-		fm_timer_lock = NULL;
 
 	ret = fm_lock_put(fm_rxtx_lock);
 	if (!ret)

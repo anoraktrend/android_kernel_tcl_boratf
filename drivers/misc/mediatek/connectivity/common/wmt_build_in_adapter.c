@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (c) 2019 MediaTek Inc.
+ */
 #include <linux/kernel.h>
 
 #include "wmt_build_in_adapter.h"
@@ -28,6 +31,9 @@
 #define CONNADP_LOG_WARN    1
 #define CONNADP_LOG_ERR     0
 
+/*******************************************************************************
+ * Connsys adaptation layer logging utility
+ ******************************************************************************/
 static unsigned int gConnAdpDbgLvl = CONNADP_LOG_INFO;
 
 #define CONNADP_LOUD_FUNC(fmt, arg...) \
@@ -68,6 +74,9 @@ static struct class *pConnDbgClass;
 static struct device *pConnDbgDev;
 static struct cdev gConnDbgdev;
 
+/*******************************************************************************
+ * Bridging from platform -> wmt_drv.ko
+ ******************************************************************************/
 static struct wmt_platform_bridge bridge;
 
 ssize_t conn_dbg_dev_write(struct file *filp, const char __user *buffer,
@@ -248,6 +257,9 @@ int mtk_wcn_conninfra_is_bus_hang(void)
 		return bridge.conninfra_reg_is_bus_hang_cb();
 }
 
+/*******************************************************************************
+ * SDIO integration with platform MMC driver
+ ******************************************************************************/
 static void mtk_wcn_cmb_sdio_request_eirq(msdc_sdio_irq_handler_t irq_handler,
 					  void *data);
 static void mtk_wcn_cmb_sdio_enable_eirq(void);

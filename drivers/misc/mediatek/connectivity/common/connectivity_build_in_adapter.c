@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (c) 2019 MediaTek Inc.
+ */
 
 #ifdef DFT_TAG
 #undef DFT_TAG
@@ -141,6 +144,9 @@ void connectivity_export_mt_ppm_sysboost_set_freq_limit(
 EXPORT_SYMBOL(connectivity_export_mt_ppm_sysboost_set_freq_limit);
 #endif
 
+/*******************************************************************************
+ * Clock Buffer Control
+ ******************************************************************************/
 #ifdef CONNADP_HAS_CLOCK_BUF_CTRL
 void connectivity_export_clk_buf_ctrl(enum clk_buf_id id, bool onoff)
 {
@@ -183,6 +189,9 @@ int connectivity_export_clk_buf_get_xo_en_sta(/*enum xo_id id*/ int id)
 EXPORT_SYMBOL(connectivity_export_clk_buf_get_xo_en_sta);
 #endif
 
+/*******************************************************************************
+ * MT6306 I2C-based GPIO Expander
+ ******************************************************************************/
 #ifdef CONFIG_MTK_MT6306_GPIO_SUPPORT
 void connectivity_export_mt6306_set_gpio_out(unsigned long pin,
 					unsigned long output)
@@ -199,6 +208,9 @@ void connectivity_export_mt6306_set_gpio_dir(unsigned long pin,
 EXPORT_SYMBOL(connectivity_export_mt6306_set_gpio_dir);
 #endif
 
+/*******************************************************************************
+ * PMIC
+ ******************************************************************************/
 void connectivity_export_pmic_config_interface(unsigned int RegNum,
 		unsigned int val, unsigned int MASK, unsigned int SHIFT)
 {
@@ -298,6 +310,9 @@ int connectivity_export_pmic_ldo_vcn33_2_lp(int user,
 EXPORT_SYMBOL(connectivity_export_pmic_ldo_vcn33_2_lp);
 #endif
 
+/*******************************************************************************
+ * MMC
+ ******************************************************************************/
 int connectivity_export_mmc_io_rw_direct(struct mmc_card *card,
 				int write, unsigned int fn,
 				unsigned int addr, u8 in, u8 *out)
@@ -308,6 +323,9 @@ int connectivity_export_mmc_io_rw_direct(struct mmc_card *card,
 }
 EXPORT_SYMBOL(connectivity_export_mmc_io_rw_direct);
 
+/******************************************************************************
+ * GPIO dump information
+ ******************************************************************************/
 #ifndef CONFIG_MTK_GPIO
 void __weak gpio_dump_regs_range(int start, int end)
 {

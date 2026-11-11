@@ -173,22 +173,29 @@ MTK_WCN_STP_SDIO_HIF_INFO *const gp_info = &g_stp_sdio_host_info;
 /* STP-SDIO probe count (not support multiple probe and hosts) */
 UINT32 g_stp_sdio_host_count;
 
-static struct timeval old = {0};
-#define TX_NO_ACK_TIMEOUT_ASSERT 5 /* tx no ack timeout assert, unit:second*/
-
 #if STP_SDIO_DBG_SUPPORT && STP_SDIO_RXDBG
 #define STP_SDIO_RXDBG_PROCNAME "driver/stp_sdio_rxdbg"
 static struct proc_dir_entry *gStpSdioRxDbgEntry;
 static INT32 stp_sdio_rxdbg_cnt;
 static struct stp_sdio_rxdbg stp_sdio_rxdbg_buffer[STP_SDIO_RXDBG_COUNT];
+static struct timespec64 old = {0};
+#define TX_NO_ACK_TIMEOUT_ASSERT 5 /* tx no ack timeout assert, unit:second*/
 
 static ssize_t stp_sdio_rxdbg_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 static ssize_t stp_sdio_rxdbg_write(struct file *filp, const char __user *buf, size_t count,
 			     loff_t *f_pos);
+
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(5, 6, 0))
 static const struct file_operations stp_sdio_rxdbg_fops = {
 	.read = stp_sdio_rxdbg_read,
 	.write = stp_sdio_rxdbg_write,
 };
+#else
+static const struct proc_ops stp_sdio_rxdbg_fops = {
+	.proc_read = stp_sdio_rxdbg_read,
+	.proc_write = stp_sdio_rxdbg_write,
+};
+#endif
 
 #endif
 
@@ -198,10 +205,17 @@ static struct proc_dir_entry *gStpSdioOwnEntry;
 static ssize_t stp_sdio_own_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 static ssize_t stp_sdio_own_write(struct file *filp, const char __user *buf, size_t count,
 			   loff_t *f_pos);
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(5, 6, 0))
 static const struct file_operations stp_sdio_own_fops = {
 	.read = stp_sdio_own_read,
 	.write = stp_sdio_own_write,
 };
+#else
+static const struct proc_ops stp_sdio_own_fops = {
+	.proc_read = stp_sdio_own_read,
+	.proc_write = stp_sdio_own_write,
+};
+#endif
 
 #endif
 
@@ -212,10 +226,17 @@ static struct proc_dir_entry *gStpSdioTxDbgEntry;
 static ssize_t stp_sdio_txdbg_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 static ssize_t stp_sdio_txdbg_write(struct file *filp, const char __user *buf, size_t count,
 			     loff_t *f_pos);
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(5, 6, 0))
 static const struct file_operations stp_sdio_txdbg_fops = {
 	.read = stp_sdio_txdbg_read,
 	.write = stp_sdio_txdbg_write,
 };
+#else
+static const struct proc_ops stp_sdio_txdbg_fops = {
+	.proc_read = stp_sdio_txdbg_read,
+	.proc_write = stp_sdio_txdbg_write,
+};
+#endif
 
 #if STP_SDIO_TXDBG
 static INT32 stp_sdio_txdbg_cnt;
@@ -1746,8 +1767,8 @@ static VOID stp_sdio_tx_wkr(struct work_struct *work)
 	UINT32 idx;
 	MTK_WCN_STP_SDIO_PKT_BUF *pb;
 	struct timeval now;
-	UINT64 ts __maybe_unused;
-	ULONG nsec __maybe_unused;
+	UINT64 ts;
+	ULONG nsec;
 
 	p_info = container_of(work, MTK_WCN_STP_SDIO_HIF_INFO, tx_work);
 	ret = HIF_SDIO_ERR_SUCCESS;
@@ -1949,9 +1970,9 @@ static VOID stp_sdio_tx_wkr(struct work_struct *work)
 	INT32 ret;
 	UINT32 idx;
 	MTK_WCN_STP_SDIO_PKT_BUF *pb;
-	struct timeval now;
-	UINT64 ts __maybe_unused;
-	ULONG nsec __maybe_unused;
+	struct timespec64 now;
+	UINT64 ts;
+	ULONG nsec;
 
 	p_info = container_of(work, MTK_WCN_STP_SDIO_HIF_INFO, tx_work);
 	ret = HIF_SDIO_ERR_SUCCESS;
