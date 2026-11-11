@@ -95,7 +95,13 @@ void kalSetDrvEmiMpuProtection(phys_addr_t emiPhyBase, uint32_t offset,
 	/*set MPU for EMI share Memory */
 	region_info.start = emiPhyBase + offset;
 	region_info.end = emiPhyBase + offset + size - 1;
-	region_info.region = 29;
+	/*
+	 * Region 24 matches the stock (TCL) wlan driver on Bora_TF; this
+	 * LK/ATF keeps region 29 locked or reserved, so writes there are
+	 * silently dropped and the CONNSYS WiFi PDMA stays firewalled
+	 * (firmware download fails with "Chip No Ack").
+	 */
+	region_info.region = 24;
 	SET_ACCESS_PERMISSION(region_info.apc, LOCK, FORBIDDEN, FORBIDDEN,
 			      FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,
 			      FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,

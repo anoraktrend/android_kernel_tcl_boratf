@@ -59,6 +59,7 @@ endif
         # for gen4m options
         export CONFIG_MTK_COMBO_WIFI_HIF=axi
         export MTK_COMBO_CHIP=CONNAC
+        export BT_PLATFORM=connac1x
         export WLAN_CHIP_ID=6765
         export MTK_ANDROID_WMT=y
         # export MTK_ANDROID_EMI=y
@@ -80,7 +81,7 @@ endif
     endif
 
 # Bluetooth
-obj-$(CONFIG_MTK_COMBO_BT) += bt/mt66xx/legacy/
+obj-$(CONFIG_MTK_COMBO_BT) += bt/wmt/
 
 # FMRadio
 obj-$(CONFIG_MTK_FMRADIO) += fmradio/

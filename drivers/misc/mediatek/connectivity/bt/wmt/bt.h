@@ -1,16 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
-*  Copyright (C) 2016 MediaTek Inc.
-*
-* This program is free software: you can redistribute it and/or modify it under the terms of the
-* GNU General Public License version 2 as published by the Free Software Foundation.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
-* without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-* See the GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License along with this program.
-* If not, see <http://www.gnu.org/licenses/>.
-*/
+ * Copyright (c) 2019 MediaTek Inc.
+ */
+
 
 #ifndef _BT_EXP_H_
 #define _BT_EXP_H_
@@ -127,7 +119,13 @@ struct pm_qos_ctrl {
  * BT Logger Tool will send 3 levels(Low, SQC and Debug)
  * Driver will not check its range so we can provide capability of extention.
  ******************************************************************************************/
-#define DEFAULT_LEVEL 0x02 /* 0x00:OFF, 0x01: LOW POWER, 0x02: SQC, 0x03: DEBUG */
+/* 0x00:OFF, 0x01: LOW POWER, 0x02: SQC, 0x03: DEBUG */
+
+#if (FW_LOG_DEFAULT_ON == 0)
+	#define DEFAULT_LEVEL 0x00
+#else
+	#define DEFAULT_LEVEL 0x02
+#endif
 
 extern int  fw_log_bt_init(void);
 extern void fw_log_bt_exit(void);

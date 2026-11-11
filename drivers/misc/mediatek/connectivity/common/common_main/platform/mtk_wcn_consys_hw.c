@@ -799,6 +799,7 @@ INT32 mtk_wcn_consys_detect_adie_chipid(UINT32 co_clock_type)
 			WMT_PLAT_PR_INFO("Set a-die chipid = %x\n", chipid);
 		} else
 			WMT_PLAT_PR_INFO("Detect a-die chipid = %x failed!\n", chipid);
+		wmt_lib_set_adie_workable((chipid > 0) ? 1 : 0);
 		WMT_PLAT_PR_INFO("CONSYS A-DIE DETECT finish\n");
 	}
 
