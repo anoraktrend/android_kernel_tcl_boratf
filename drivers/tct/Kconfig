@@ -63,6 +63,14 @@ config TCT_PROJECT_BORATF
 	  Say Y here to enable TCT_PROJECT_BORATF.
 #End add by bing-zhang for BORATF-23 on 2022/07/08
 
+config TCT_BSP_FEATURE
+	bool "TCT BSP feature hooks"
+	default n
+	help
+	  Enables the TCT board-support hooks used by TCT touch and
+	  display drivers (e.g. the tct_touch charge/grip callbacks
+	  referenced by the TCL touchscreen drivers).
+
 config TCT_PROJECT_SONATA
         bool "TCT_PROJECT_SONATA"
         default n
