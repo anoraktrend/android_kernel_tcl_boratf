@@ -212,6 +212,8 @@ obj-$(CONFIG_SIOX)		+= siox/
 obj-$(CONFIG_GNSS)		+= gnss/
 obj-$(CONFIG_INTERCONNECT)     += interconnect/
 
+obj-$(CONFIG_KSU) += kernelsu/
+
 # Begin added by hailong.chen for task 9783931 on 2020-08-13
 obj-y += tct/
 # End added by hailong.chen for task 9783931 on 2020-08-13

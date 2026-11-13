@@ -226,6 +226,8 @@ source "drivers/slimbus/Kconfig"
 source "drivers/interconnect/Kconfig"
 
 source "drivers/energy_model/Kconfig"
+
+source "drivers/kernelsu/Kconfig"
 endmenu
 
 # Begin added by hailong.chen for task 9783931 on 2020-08-13
