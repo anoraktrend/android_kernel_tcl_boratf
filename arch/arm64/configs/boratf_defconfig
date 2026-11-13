@@ -116,7 +116,7 @@ CONFIG_CUSTOM_KERNEL_IMGSENSOR="tspph8a1408_hi846_mipi_raw tcl0003ba_gc08a3_mipi
 CONFIG_MTK_VIDEOCODEC_DRIVER=y
 CONFIG_MTK_LCM=y
 #begin add by yusen.ke.sz  for bringup lcm on 20210324
-CONFIG_CUSTOM_KERNEL_LCM="bora_ft8006s_coe_hd_vdo bora_gc7202_ykl_hd_vdo bora_nl9911c_tdt_hd_vdo"
+CONFIG_CUSTOM_KERNEL_LCM="bora_ft8006s_coe_hd_vdo bora_gc7202_ykl_hd_vdo bora_nl9911c_tdt_hd_vdo bora_gc7202h_ykl_hd_vdo"
 #end add by yusen.ke.sz  for bringup lcm on 20210324
 CONFIG_MTK_SYNC=y
 CONFIG_MTK_FB=y
