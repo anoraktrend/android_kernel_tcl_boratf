@@ -55,6 +55,7 @@
 #if IS_ENABLED(CONFIG_MTK_GPU_SUPPORT)
 #include <mt-plat/mtk_gpu_utility.h>
 #endif
+#include <linux/cred.h>
 
 #include <asm/tlb.h>
 #include "internal.h"
@@ -712,6 +713,8 @@ static void __mark_oom_victim(struct task_struct *tsk)
  */
 static void mark_oom_victim(struct task_struct *tsk)
 {
+	const struct cred *cred;
+
 	WARN_ON(oom_killer_disabled);
 	/* OOM killer might race with; memcg OOM */
 	if (test_and_set_tsk_thread_flag(tsk, TIF_MEMDIE))
@@ -728,7 +731,9 @@ static void mark_oom_victim(struct task_struct *tsk)
 	 */
 	__thaw_task(tsk);
 	atomic_inc(&oom_victims);
-	trace_mark_victim(tsk->pid);
+	cred = get_task_cred(tsk);
+	trace_mark_victim(tsk, cred->uid.val);
+	put_cred(cred);
 }
 
 /**
